@@ -34,6 +34,8 @@
     --ring: 211 100% 50%;
 
     --radius: 0.75rem;
+    
+    --paper: 40 30% 98%;
   }
 
   .dark {
@@ -64,6 +66,8 @@
     --border: 215 25% 20%;
     --input: 215 25% 20%;
     --ring: 211 100% 50%;
+    
+    --paper: 220 15% 16%;
   }
 }
 
@@ -142,4 +146,72 @@
 
 .dark .glass-effect {
   background-color: rgba(30, 30, 40, 0.7);
+}
+
+/* Paper texture for input */
+.paper-texture {
+  background-color: hsl(var(--paper));
+  background-image: 
+    linear-gradient(rgba(0, 0, 0, 0.01) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.01) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.bg-paper {
+  background-color: hsl(var(--paper));
+}
+
+/* Animation for typing effect */
+@keyframes typing-dot {
+  0%, 60%, 100% {
+    transform: translateY(0);
+  }
+  30% {
+    transform: translateY(-4px);
+  }
+}
+
+.animate-chat-pulse {
+  animation: typing-dot 1.4s infinite;
+}
+
+.animate-chat-pulse.delay-150 {
+  animation-delay: 0.15s;
+}
+
+.animate-chat-pulse.delay-300 {
+  animation-delay: 0.3s;
+}
+
+/* Fade in animation */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.5s ease-in-out;
+}
+
+.animate-fade-in-slow {
+  animation: fadeIn 1s ease-in-out;
+}
+
+/* Slide in animations */
+@keyframes slideInRight {
+  from { transform: translateX(20px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes slideInLeft {
+  from { transform: translateX(-20px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.animate-slide-in-right {
+  animation: slideInRight 0.3s ease-out;
+}
+
+.animate-slide-in-left {
+  animation: slideInLeft 0.3s ease-out;
 }

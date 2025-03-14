@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { SendHorizontal } from 'lucide-react';
 import { sampleUserQueries } from '@/utils/mockData';
+import { Textarea } from '@/components/ui/textarea';
 
 interface QueryInputProps {
   onSubmit: (query: string) => void;
@@ -13,7 +14,7 @@ interface QueryInputProps {
 const QueryInput: React.FC<QueryInputProps> = ({ onSubmit, isLoading }) => {
   const [query, setQuery] = useState<string>('');
   const [suggestions, setSuggestions] = useState<string[]>([]);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     // Populate with some sample queries on initial load
@@ -31,7 +32,7 @@ const QueryInput: React.FC<QueryInputProps> = ({ onSubmit, isLoading }) => {
       
       // Focus the input after submission
       setTimeout(() => {
-        inputRef.current?.focus();
+        textareaRef.current?.focus();
       }, 100);
     }
   };
@@ -61,24 +62,31 @@ const QueryInput: React.FC<QueryInputProps> = ({ onSubmit, isLoading }) => {
       )}
       
       <form onSubmit={handleSubmit} className="relative animate-fade-in">
-        <Input
-          ref={inputRef}
-          type="text"
-          placeholder="Ask about an ethical dilemma..."
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          className="pr-12 py-6 bg-background border-border/80 focus-visible:ring-primary/30 shadow-sm"
-          disabled={isLoading}
-        />
+        <div className="paper-texture rounded-lg overflow-hidden border border-border/80 shadow-md">
+          <Textarea
+            ref={textareaRef}
+            placeholder="Ask about an ethical dilemma..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="min-h-[80px] resize-none py-4 px-5 bg-paper focus-visible:ring-primary/30 text-base md:text-sm"
+            disabled={isLoading}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSubmit(e);
+              }
+            }}
+          />
+        </div>
         <Button
           type="submit"
           size="icon"
-          className={`absolute right-2 top-1/2 transform -translate-y-1/2 rounded-full w-8 h-8 ${
+          className={`absolute right-3 bottom-3 rounded-full w-10 h-10 ${
             !query.trim() || isLoading ? 'opacity-50 cursor-not-allowed' : 'opacity-100'
           }`}
           disabled={!query.trim() || isLoading}
         >
-          <SendHorizontal className="h-4 w-4" />
+          <SendHorizontal className="h-5 w-5" />
         </Button>
       </form>
     </div>

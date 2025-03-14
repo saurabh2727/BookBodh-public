@@ -23,6 +23,7 @@ export interface Book {
   genre: string;
   summary: string;
   coverColor: string;
+  imageUrl?: string; // Added for real book covers
 }
 
 export type BookGenre = 'Philosophy' | 'Ethics' | 'Self-Help' | 'Spirituality' | 'Psychology';

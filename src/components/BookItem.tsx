@@ -15,9 +15,17 @@ const BookItem: React.FC<BookItemProps> = ({ book, onClick }) => {
       onClick={onClick}
     >
       <div 
-        className={`h-32 w-24 rounded-md shadow-md flex items-center justify-center ${book.coverColor} group-hover:shadow-lg transition-all duration-300`}
+        className={`h-36 w-24 rounded-md shadow-md flex items-center justify-center group-hover:shadow-lg transition-all duration-300 overflow-hidden ${!book.imageUrl ? book.coverColor : ''}`}
       >
-        <BookIcon className="h-10 w-10 text-white/80" />
+        {book.imageUrl ? (
+          <img 
+            src={book.imageUrl} 
+            alt={book.title} 
+            className="object-cover w-full h-full"
+          />
+        ) : (
+          <BookIcon className="h-10 w-10 text-white/80" />
+        )}
       </div>
       <p className="text-center text-sm font-medium line-clamp-2 text-foreground/90 max-w-full px-2">
         {book.title}

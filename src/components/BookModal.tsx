@@ -26,9 +26,17 @@ const BookModal: React.FC<BookModalProps> = ({ book, isOpen, onClose, onChatWith
         <DialogHeader>
           <div className="flex items-start gap-4">
             <div 
-              className={`h-24 w-16 rounded-md shadow-md flex-shrink-0 flex items-center justify-center ${book.coverColor}`}
+              className={`h-36 w-24 rounded-md shadow-md flex-shrink-0 flex items-center justify-center overflow-hidden ${!book.imageUrl ? book.coverColor : ''}`}
             >
-              <BookOpen className="h-8 w-8 text-white/80" />
+              {book.imageUrl ? (
+                <img 
+                  src={book.imageUrl} 
+                  alt={book.title} 
+                  className="object-cover w-full h-full"
+                />
+              ) : (
+                <BookOpen className="h-8 w-8 text-white/80" />
+              )}
             </div>
             <div>
               <DialogTitle className="text-xl">{book.title}</DialogTitle>

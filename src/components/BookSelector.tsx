@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Book } from '@/types';
 import { mockBooks } from '@/utils/mockData';
-import { Search } from 'lucide-react';
+import { BookOpen, Search } from 'lucide-react';
 
 interface BookSelectorProps {
   onClose: () => void;
@@ -61,11 +61,19 @@ const BookSelector: React.FC<BookSelectorProps> = ({ onClose, onSelectBook }) =>
                       onClick={() => onSelectBook(book)}
                     >
                       <div 
-                        className={`h-12 w-10 rounded ${book.coverColor} flex items-center justify-center flex-shrink-0`}
+                        className={`h-16 w-12 rounded overflow-hidden ${!book.imageUrl ? book.coverColor : ''} flex items-center justify-center flex-shrink-0`}
                       >
-                        <span className="text-white/90 text-xs font-medium">
-                          {book.title.substring(0, 2).toUpperCase()}
-                        </span>
+                        {book.imageUrl ? (
+                          <img 
+                            src={book.imageUrl} 
+                            alt={book.title} 
+                            className="object-cover w-full h-full"
+                          />
+                        ) : (
+                          <span className="text-white/90 text-xs font-medium">
+                            {book.title.substring(0, 2).toUpperCase()}
+                          </span>
+                        )}
                       </div>
                       <div className="overflow-hidden">
                         <p className="text-sm font-medium text-foreground truncate">{book.title}</p>
