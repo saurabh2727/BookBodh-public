@@ -139,3 +139,7 @@
   background-clip: text;
   color: transparent;
 }
+
+.dark .glass-effect {
+  background-color: rgba(30, 30, 40, 0.7);
+}
