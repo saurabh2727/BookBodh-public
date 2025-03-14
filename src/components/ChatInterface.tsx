@@ -3,12 +3,21 @@ import React, { useState, useRef, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import ChatMessage from './ChatMessage';
 import QueryInput from './QueryInput';
-import { ChatMessage as ChatMessageType } from '@/types';
+import { Button } from '@/components/ui/button';
+import { BookOpen } from 'lucide-react';
+import { ChatMessage as ChatMessageType, Book } from '@/types';
 import { initialMessages, sampleCitations } from '@/utils/mockData';
+import BookSelector from './BookSelector';
 
-const ChatInterface: React.FC = () => {
+interface ChatInterfaceProps {
+  selectedBook: string | null;
+}
+
+const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedBook }) => {
   const [messages, setMessages] = useState<ChatMessageType[]>(initialMessages);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [chatMode, setChatMode] = useState<'saved' | 'temp'>('saved');
+  const [showBookSelector, setShowBookSelector] = useState<boolean>(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to the bottom when messages change
@@ -17,6 +26,21 @@ const ChatInterface: React.FC = () => {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages]);
+
+  // If a book was selected, show a welcome message
+  useEffect(() => {
+    if (selectedBook && messages.length <= 1) {
+      // Add a bot message about the selected book
+      const bookWelcomeMessage: ChatMessageType = {
+        id: uuidv4(),
+        content: `I'm here to discuss "${selectedBook}" with you. What would you like to know about the ideas in this book?`,
+        type: 'bot',
+        timestamp: new Date(),
+      };
+      
+      setMessages(prev => [...prev, bookWelcomeMessage]);
+    }
+  }, [selectedBook]);
 
   const handleSubmit = async (query: string) => {
     if (isLoading) return;
@@ -73,19 +97,72 @@ const ChatInterface: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-8rem)]">
-      <div className="flex-1 overflow-y-auto px-4 py-6 scrollbar-hidden">
-        <div className="space-y-6">
-          {messages.map((message) => (
-            <ChatMessage key={message.id} message={message} />
-          ))}
-          <div ref={messagesEndRef} />
+    <div className="flex flex-col h-full">
+      {!selectedBook && messages.length <= 1 && (
+        <div className="flex flex-col items-center justify-center py-12 text-center space-y-4 animate-fade-in">
+          <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+            <BookOpen className="h-8 w-8 text-primary" />
+          </div>
+          <h2 className="text-2xl font-display font-medium">Chat with a Book</h2>
+          <p className="text-muted-foreground max-w-md mx-auto">
+            Get advice and wisdom from great books. You can ask a question directly 
+            or select a book to have a focused conversation.
+          </p>
+          <div className="flex flex-wrap gap-2 justify-center mt-4">
+            <Button 
+              variant="outline" 
+              className="bg-primary/5 hover:bg-primary/10 border-primary/20"
+              onClick={() => setShowBookSelector(true)}
+            >
+              <BookOpen className="mr-2 h-4 w-4" />
+              Select a Book
+            </Button>
+            <Button
+              variant={chatMode === 'saved' ? 'default' : 'outline'}
+              className={chatMode === 'saved' ? '' : 'bg-primary/5 hover:bg-primary/10 border-primary/20'}
+              onClick={() => setChatMode('saved')}
+              size="sm"
+            >
+              Saved Chat
+            </Button>
+            <Button
+              variant={chatMode === 'temp' ? 'default' : 'outline'}
+              className={chatMode === 'temp' ? '' : 'bg-primary/5 hover:bg-primary/10 border-primary/20'}
+              onClick={() => setChatMode('temp')}
+              size="sm"
+            >
+              Temp Chat
+            </Button>
+          </div>
         </div>
-      </div>
-      
-      <div className="p-4 border-t border-border/40 bg-background glass-effect">
-        <QueryInput onSubmit={handleSubmit} isLoading={isLoading} />
-      </div>
+      )}
+
+      {(selectedBook || messages.length > 1) && (
+        <>
+          <div className="flex-1 overflow-y-auto px-4 py-6 scrollbar-hidden">
+            <div className="space-y-6">
+              {messages.map((message) => (
+                <ChatMessage key={message.id} message={message} />
+              ))}
+              <div ref={messagesEndRef} />
+            </div>
+          </div>
+          
+          <div className="p-4 border-t border-border/40 bg-background glass-effect">
+            <QueryInput onSubmit={handleSubmit} isLoading={isLoading} />
+          </div>
+        </>
+      )}
+
+      {showBookSelector && (
+        <BookSelector 
+          onClose={() => setShowBookSelector(false)}
+          onSelectBook={(book) => {
+            setShowBookSelector(false);
+            // Logic to load book
+          }}
+        />
+      )}
     </div>
   );
 };

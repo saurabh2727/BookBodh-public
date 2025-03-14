@@ -15,3 +15,14 @@ export interface ChatMessage {
   citations?: Citation[];
   isLoading?: boolean;
 }
+
+export interface Book {
+  id: string;
+  title: string;
+  author: string;
+  genre: string;
+  summary: string;
+  coverColor: string;
+}
+
+export type BookGenre = 'Philosophy' | 'Ethics' | 'Self-Help' | 'Spirituality' | 'Psychology';

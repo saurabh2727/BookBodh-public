@@ -11,9 +11,9 @@ const Header: React.FC = () => {
         </div>
         <div>
           <h1 className="text-lg font-display font-medium tracking-tight">
-            <span className="gradient-text">Ethical</span> Wisdom
+            <span className="gradient-text">Book</span> Bodh
           </h1>
-          <p className="text-xs text-muted-foreground">Guidance from great books</p>
+          <p className="text-xs text-muted-foreground">Wisdom from great books</p>
         </div>
       </div>
     </header>
