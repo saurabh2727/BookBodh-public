@@ -13,7 +13,16 @@ class Settings(BaseSettings):
     
     # Database settings
     CHUNK_SIZE: int = 300  # words per chunk
+    CHUNK_OVERLAP: int = 50  # words overlap between chunks
     TOP_K_RESULTS: int = 3  # number of chunks to retrieve
+    
+    # Upload settings
+    MAX_UPLOAD_SIZE: int = 10 * 1024 * 1024  # 10MB
+    ALLOWED_EXTENSIONS: list[str] = ["pdf"]
+    UPLOAD_DIR: str = "app/uploads"
+    
+    # Embedding model
+    EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
     
     class Config:
         env_file = ".env"

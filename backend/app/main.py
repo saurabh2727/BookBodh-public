@@ -1,22 +1,28 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import chat
+import os
 
-app = FastAPI(title="BookBodh API", description="Backend API for BookBodh chat application")
+from app.routers import chat, books
 
-# Enable CORS for frontend - updated with more permissive settings
+# Create uploads directory if it doesn't exist
+os.makedirs("app/uploads", exist_ok=True)
+
+app = FastAPI(title="BookBodh API")
+
+# Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://localhost:8080", "https://id-preview--af882bf9-fec5-411a-9e6a-4e25c8beccfe.lovable.app"],
+    allow_origins=["*"],  # For development; restrict in production
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Include routers
 app.include_router(chat.router)
+app.include_router(books.router)
 
 @app.get("/")
 async def root():
-    return {"message": "BookBodh Backend Running"}
+    return {"message": "BookBodh Backend API"}

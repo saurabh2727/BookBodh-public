@@ -1,6 +1,7 @@
 
 from typing import Dict, List, Optional
 import re
+import uuid
 
 class BookDatabase:
     def __init__(self):
@@ -101,6 +102,56 @@ Aurelius consistently returns to the importance of accepting what cannot be chan
                         "text": chunk_text
                     })
                     chunk_id += 1
+    
+    def add_book(self, title: str, author: str, content: str) -> str:
+        """
+        Add a new book to the database
+        
+        Args:
+            title: Book title
+            author: Book author
+            content: Book text content
+            
+        Returns:
+            Book ID
+        """
+        # Check if book already exists
+        if title in self.books:
+            title = f"{title} ({uuid.uuid4().hex[:8]})"
+        
+        # Add book to database
+        self.books[title] = {
+            "author": author,
+            "content": content
+        }
+        
+        # Process new book into chunks
+        chunk_size = 300  # Same as in _process_books
+        
+        # Clean text
+        content = re.sub(r'\s+', ' ', content).strip()
+        
+        # Split into words
+        words = content.split()
+        
+        # Get next chunk ID
+        chunk_id = len(self.chunks)
+        
+        # Create chunks with overlap
+        overlap = 50  # Words overlap between chunks
+        for i in range(0, len(words), chunk_size - overlap):
+            chunk_words = words[i:i+chunk_size]
+            if chunk_words:
+                chunk_text = ' '.join(chunk_words)
+                self.chunks.append({
+                    "id": chunk_id,
+                    "title": title,
+                    "author": author,
+                    "text": chunk_text
+                })
+                chunk_id += 1
+        
+        return title
     
     def get_all_chunks(self) -> List[Dict]:
         """Return all text chunks with metadata"""
