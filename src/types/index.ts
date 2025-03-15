@@ -27,3 +27,15 @@ export interface Book {
 }
 
 export type BookGenre = 'Philosophy' | 'Ethics' | 'Self-Help' | 'Spirituality' | 'Psychology';
+
+// API Request/Response Types for Backend Integration
+export interface ChatRequest {
+  query: string;
+  book?: string | null;
+}
+
+export interface ChatResponse {
+  response: string;
+  book?: string | null;
+  author?: string | null;
+}
