@@ -1,4 +1,3 @@
-
 import React, { useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
@@ -41,7 +40,6 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete, onClose }) =>
   };
 
   const handleFileChange = (selectedFile: File) => {
-    // Validate file type
     if (!selectedFile.name.toLowerCase().endsWith('.pdf')) {
       toast({
         title: "Invalid file type",
@@ -51,7 +49,6 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete, onClose }) =>
       return;
     }
     
-    // Validate file size (10MB max)
     const maxSize = 10 * 1024 * 1024; // 10MB
     if (selectedFile.size > maxSize) {
       toast({
@@ -78,12 +75,10 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete, onClose }) =>
     setIsUploading(true);
     setUploadProgress(0);
     
-    // Create form data
     const formData = new FormData();
     formData.append('file', file);
     
     try {
-      // Simulate progress
       const progressInterval = setInterval(() => {
         setUploadProgress(prev => {
           const newProgress = Math.min(prev + 10, 90);
@@ -91,7 +86,6 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete, onClose }) =>
         });
       }, 300);
       
-      // Send upload request
       const response = await fetch('http://localhost:8000/upload-book', {
         method: 'POST',
         body: formData,
@@ -109,6 +103,7 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete, onClose }) =>
         if (onUploadComplete) {
           onUploadComplete(true, data.message);
         }
+        setFile(null);
       } else {
         const error = await response.json();
         toast({
@@ -131,10 +126,6 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete, onClose }) =>
       }
     } finally {
       setIsUploading(false);
-      // Reset the form after a successful upload
-      if (response.ok) {
-        setFile(null);
-      }
     }
   };
 
