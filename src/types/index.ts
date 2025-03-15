@@ -1,4 +1,3 @@
-
 export type MessageType = 'user' | 'bot';
 
 export interface Citation {
@@ -27,6 +26,9 @@ export interface Book {
 }
 
 export type BookGenre = 'Philosophy' | 'Ethics' | 'Self-Help' | 'Spirituality' | 'Psychology';
+
+// Chat mode types - unified definition
+export type ChatMode = 'general' | 'specific-book' | 'saved' | 'temp';
 
 // API Request/Response Types for Backend Integration
 export interface ChatRequest {

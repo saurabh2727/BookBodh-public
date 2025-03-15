@@ -1,10 +1,7 @@
-
 import { useState, useCallback, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { ChatMessage, ChatRequest } from '@/types';
+import { ChatMessage, ChatRequest, ChatMode } from '@/types';
 import { sendChatRequest } from '@/services/api';
-
-type ChatMode = 'general' | 'specific-book';
 
 const useChat = (selectedBook: string | null) => {
   const [messages, setMessages] = useState<ChatMessage[]>([

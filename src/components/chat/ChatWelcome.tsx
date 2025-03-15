@@ -2,11 +2,12 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { BookOpen } from 'lucide-react';
+import { ChatMode } from '@/types';
 
 interface ChatWelcomeProps {
   onSelectBookClick: () => void;
-  onChatModeChange: (mode: 'saved' | 'temp') => void;
-  chatMode: 'saved' | 'temp';
+  onChatModeChange: (mode: ChatMode) => void;
+  chatMode: ChatMode;
   onExampleQuestionClick: (question: string) => void;
 }
 
