@@ -1,8 +1,13 @@
 
 import requests
 import json
+import logging
 from typing import Dict, List
 from app.config.settings import settings
+
+# Configure logger
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 def generate_response(query: str, chunks: List[Dict]) -> Dict:
     """
@@ -50,10 +55,11 @@ Provide a thoughtful, well-reasoned response with quotations from the book where
     
     try:
         response = requests.post(
-            "https://api.xai.com/v1/chat/completions",
+            "https://api.groq.com/openai/v1/chat/completions",
             headers=headers,
             data=json.dumps(payload)
         )
+        logger.info(f"Grok API response: {response.text}")
         response.raise_for_status()
         
         # Extract response from Grok

@@ -1,13 +1,13 @@
 
 # API keys and configuration settings
-from pydantic import BaseSettings
+from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # Replace the placeholder with the real Grok API key
     GROK_API_KEY: str = "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"
     
     # Model settings
-    DEFAULT_MODEL: str = "grok-1"
+    DEFAULT_MODEL: str = "llama3-70b-8192"
     MAX_TOKENS: int = 500
     TEMPERATURE: float = 0.7
     
