@@ -1,14 +1,22 @@
 
 # API keys and configuration settings
+from pydantic import BaseSettings
 
-# Grok API key (replace this with your actual key)
-GROK_API_KEY = "YOUR_GROK_API_KEY_HERE"
+class Settings(BaseSettings):
+    # Replace the placeholder with the real Grok API key
+    GROK_API_KEY: str = "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"
+    
+    # Model settings
+    DEFAULT_MODEL: str = "grok-1"
+    MAX_TOKENS: int = 500
+    TEMPERATURE: float = 0.7
+    
+    # Database settings
+    CHUNK_SIZE: int = 300  # words per chunk
+    TOP_K_RESULTS: int = 3  # number of chunks to retrieve
+    
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
 
-# Model settings
-DEFAULT_MODEL = "grok-1"
-MAX_TOKENS = 500
-TEMPERATURE = 0.7
-
-# Database settings
-CHUNK_SIZE = 300  # words per chunk
-TOP_K_RESULTS = 3  # number of chunks to retrieve
+settings = Settings()

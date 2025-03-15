@@ -2,7 +2,7 @@
 import requests
 import json
 from typing import Dict, List
-from app.config.settings import GROK_API_KEY
+from app.config.settings import settings
 
 def generate_response(query: str, chunks: List[Dict]) -> Dict:
     """
@@ -35,17 +35,17 @@ Provide a thoughtful, well-reasoned response with quotations from the book where
     # Call Grok API
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {GROK_API_KEY}"
+        "Authorization": f"Bearer {settings.GROK_API_KEY}"
     }
     
     payload = {
-        "model": "grok-1",
+        "model": settings.DEFAULT_MODEL,
         "messages": [
             {"role": "system", "content": "You are a helpful assistant that provides insights from books."},
             {"role": "user", "content": prompt}
         ],
-        "temperature": 0.7,
-        "max_tokens": 500
+        "temperature": settings.TEMPERATURE,
+        "max_tokens": settings.MAX_TOKENS
     }
     
     try:
@@ -78,6 +78,7 @@ Provide a thoughtful, well-reasoned response with quotations from the book where
         
     except Exception as e:
         # In case of API failure, return a graceful error message
+        print(f"Grok API error: {str(e)}")
         return {
             "response": f"I'm sorry, I encountered an issue while processing your request. Error: {str(e)}",
             "book": None,
