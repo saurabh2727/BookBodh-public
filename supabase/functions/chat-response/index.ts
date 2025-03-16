@@ -1,3 +1,4 @@
+
 // Follow the steps below to run locally:
 // 1. deno install -Arf -n supabase https://deno.land/x/supabase/cli/bin/supabase.ts
 // 2. supabase functions serve chat-response --no-verify-jwt
@@ -244,15 +245,63 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Check if bookId is provided, return error if not
-    if (!bookId) {
-      return new Response(
-        JSON.stringify({ error: 'No book selected' }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    // If we have a book parameter but no book ID, use a different error message
+    if (book && !bookId) {
+      console.log('Book title provided without bookId');
+      
+      try {
+        // Try to find the book by title
+        const { data: bookData, error: bookError } = await supabaseClient
+          .from('books')
+          .select('id, title, author')
+          .ilike('title', `%${book}%`)
+          .limit(1);
+          
+        if (bookError) {
+          console.error('Error finding book by title:', bookError);
+        } else if (bookData && bookData.length > 0) {
+          console.log('Found book by title:', bookData[0]);
+          
+          // Process with the found bookId
+          const foundBookId = bookData[0].id;
+          
+          // Update the request data with the found bookId for processing
+          return new Response(
+            JSON.stringify({
+              response: `I found "${bookData[0].title}" in your library. Please try asking your question again by selecting this book directly.`,
+              book: bookData[0].title,
+              author: bookData[0].author
+            }),
+            {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            }
+          );
         }
-      );
+        
+        // If we can't find the book, respond with a better message
+        return new Response(
+          JSON.stringify({
+            response: `I don't see "${book}" in your library. You can upload this book or ask a general question without specifying a book.`,
+            book: null,
+            author: null
+          }),
+          {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      } catch (err) {
+        console.error('Error processing book title:', err);
+        return new Response(
+          JSON.stringify({
+            response: `I couldn't process your query about "${book}". Please try selecting a book from your library directly.`,
+            book: null,
+            author: null
+          }),
+          {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
     }
 
     // Format context from chunks
@@ -347,7 +396,6 @@ Deno.serve(async (req) => {
         );
       }
     }
-    // We've removed the block that fetches all books for general context
 
     console.log(`Processing ${chunks.length} chunks for context`);
     const book_citations: Record<string, string> = {};

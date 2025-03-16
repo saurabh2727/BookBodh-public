@@ -59,7 +59,7 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
     };
 
     loadBookChunks();
-  }, [selectedBookId, selectedBook]);
+  }, [selectedBookId, selectedBook, messages]);
 
   const handleSubmit = async (query: string) => {
     if (!query.trim() || isLoading) return;

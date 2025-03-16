@@ -19,7 +19,7 @@ async def chat(request: ChatRequest):
     """
     try:
         # For general chat without a book selected
-        if not request.book and not request.bookId:
+        if not request.book and not request.bookId and not request.chunks:
             return ChatResponse(
                 response=f"I'm BookBodh, your AI assistant. {request.query}",
                 book=None,
@@ -27,9 +27,13 @@ async def chat(request: ChatRequest):
             )
             
         # If a book is specified, use book-specific logic
-        if request.book or request.bookId:
-            # Retrieve relevant chunks based on query and optional book filter
-            chunks = retrieve_chunks(request.query, request.book)
+        if request.book or request.bookId or request.chunks:
+            # Use provided chunks if available, otherwise retrieve them
+            if request.chunks:
+                chunks = request.chunks
+            else:
+                # Retrieve relevant chunks based on query and optional book filter
+                chunks = retrieve_chunks(request.query, request.book, request.bookId)
             
             if not chunks:
                 # If no relevant chunks found, return a helpful message
