@@ -1,67 +1,49 @@
 
-import React, { useState, useEffect } from 'react';
-import { BookOpen } from 'lucide-react';
-import ThemeToggle from './ThemeToggle';
+import React from 'react';
+import { ModeToggle } from '@/components/ThemeToggle';
 import { Button } from '@/components/ui/button';
-import { signOut, checkAuth } from '@/services/api';
-import { useNavigate } from 'react-router-dom';
-import { useToast } from '@/hooks/use-toast';
+import { LogOut } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
+import { useToast } from '@/components/ui/use-toast';
 
-const Header = () => {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const navigate = useNavigate();
+const Header: React.FC = () => {
   const { toast } = useToast();
-  
-  useEffect(() => {
-    const checkAuthentication = async () => {
-      const session = await checkAuth();
-      setIsAuthenticated(!!session);
-    };
-    
-    checkAuthentication();
-  }, []);
-  
+
   const handleSignOut = async () => {
     try {
-      await signOut();
+      await supabase.auth.signOut();
       toast({
-        title: "Signed Out",
-        description: "You have been successfully signed out.",
+        title: "Signed out successfully",
+        description: "You have been logged out of your account."
       });
-      navigate('/login');
-    } catch (error) {
+    } catch (error: any) {
       toast({
-        title: "Error",
-        description: "Failed to sign out. Please try again.",
+        title: "Error signing out",
+        description: error.message,
         variant: "destructive"
       });
-      console.error('Sign out error:', error);
     }
   };
-  
+
   return (
     <header className="border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="container flex h-14 max-w-screen-2xl items-center">
-        <div className="flex items-center gap-2 font-bold">
-          <BookOpen className="h-5 w-5" />
-          <span className="hidden sm:inline-block">BookBodh</span>
+      <div className="container flex h-14 max-w-screen-xl items-center">
+        <div className="mr-4 flex">
+          <a href="/" className="flex items-center space-x-2">
+            <span className="font-bold inline-block">BookBodh</span>
+          </a>
         </div>
-        
         <div className="flex flex-1 items-center justify-end space-x-2">
-          <div className="w-full flex-1 md:w-auto md:flex-none"></div>
-          
           <nav className="flex items-center space-x-2">
-            <ThemeToggle />
-            
-            {isAuthenticated && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleSignOut}
-              >
-                Sign Out
-              </Button>
-            )}
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              onClick={handleSignOut} 
+              title="Sign out"
+            >
+              <LogOut className="h-[1.2rem] w-[1.2rem]" />
+            </Button>
+            <ModeToggle />
           </nav>
         </div>
       </div>

@@ -1,42 +1,54 @@
 
 import React, { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { checkAuth } from '@/services/api';
+import { supabase } from '@/lib/supabase';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
 }
 
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
-  const [isLoading, setIsLoading] = useState(true);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [authenticated, setAuthenticated] = useState(false);
 
   useEffect(() => {
-    const checkAuthentication = async () => {
+    const checkAuth = async () => {
       try {
-        const session = await checkAuth();
-        setIsAuthenticated(!!session);
+        const { data } = await supabase.auth.getSession();
+        if (data.session) {
+          setAuthenticated(true);
+        }
       } catch (error) {
-        console.error('Auth check error:', error);
-        setIsAuthenticated(false);
+        console.error('Error checking authentication:', error);
       } finally {
-        setIsLoading(false);
+        setLoading(false);
       }
     };
 
-    checkAuthentication();
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setAuthenticated(!!session);
+        setLoading(false);
+      }
+    );
+
+    checkAuth();
+
+    return () => {
+      authListener?.subscription.unsubscribe();
+    };
   }, []);
 
-  if (isLoading) {
+  if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="animate-spin h-8 w-8 border-4 border-primary/30 border-t-primary rounded-full"></div>
       </div>
     );
   }
 
-  if (!isAuthenticated) {
-    return <Navigate to="/login" />;
+  if (!authenticated) {
+    return <Navigate to="/login" replace />;
   }
 
   return <>{children}</>;
