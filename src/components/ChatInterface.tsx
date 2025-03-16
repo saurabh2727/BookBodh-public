@@ -192,7 +192,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedBookId }) => {
               </div>
             ) : (
               <div className="text-sm font-medium text-muted-foreground">
-                Please select a book to start chatting
+                General Chat Mode - Select a book for book-specific answers
               </div>
             )}
             <div className="flex gap-2">

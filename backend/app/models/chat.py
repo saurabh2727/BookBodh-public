@@ -12,4 +12,3 @@ class ChatResponse(BaseModel):
     response: str
     book: Optional[str] = None
     author: Optional[str] = None
-

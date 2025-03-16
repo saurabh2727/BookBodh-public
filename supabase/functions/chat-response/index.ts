@@ -193,6 +193,57 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Handle general chat (no book selected)
+    if (!bookId && !book) {
+      console.log('Processing general chat query');
+      
+      try {
+        const grokData = await callGrokWithRetry(`You are BookBodh, a helpful AI assistant that can answer general questions. 
+          Please respond to this query: ${query}`);
+        
+        const responseText = grokData.choices[0].message.content;
+        
+        // Save chat history to database
+        try {
+          const { error: insertError } = await supabaseClient
+            .from('chat_history')
+            .insert({
+              user_id: user.id,
+              query,
+              response: responseText,
+              book: null,
+              author: null
+            });
+
+          if (insertError) {
+            console.error('Error saving chat history:', insertError);
+          }
+        } catch (err) {
+          console.error('Error in chat history insertion:', err);
+        }
+        
+        return new Response(
+          JSON.stringify({
+            response: responseText,
+            book: null,
+            author: null
+          }),
+          {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      } catch (grokError) {
+        console.error('Grok API error in general chat:', grokError);
+        return new Response(
+          JSON.stringify({ error: `Error calling AI service: ${grokError.message}` }),
+          {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+    }
+
     // Check if bookId is provided, return error if not
     if (!bookId) {
       return new Response(

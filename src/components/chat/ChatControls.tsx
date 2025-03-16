@@ -43,11 +43,12 @@ const ChatControls: React.FC<ChatControlsProps> = ({
         });
       }
     } else {
+      // General chat suggestions when no book is selected
       setDynamicSuggestions([
-        "Please select a book to start chatting",
-        "You need to select a book first",
-        "Upload a book or select one from your library",
-        "Chat requires a book selection"
+        "Hello, how can you help me?",
+        "What can you do for me?",
+        "Tell me about yourself",
+        "How does this app work?"
       ]);
     }
   }, [selectedBookId, selectedBookTitle, toast]);
@@ -62,17 +63,17 @@ const ChatControls: React.FC<ChatControlsProps> = ({
       setInputValue(defaultQuestion);
       onSubmit(defaultQuestion);
     } else {
-      toast({
-        variant: "destructive",
-        title: "No book selected",
-        description: "Please select a book first to start chatting.",
-      });
+      // Start general chat
+      setShowStartChat(false);
+      const defaultQuestion = "Hello, what can you help me with today?";
+      setInputValue(defaultQuestion);
+      onSubmit(defaultQuestion);
     }
   };
 
   return (
     <div className="mt-4 px-4 py-4 border-t border-border/50 bg-background/95 backdrop-blur-sm">
-      {selectedBookId && showStartChat ? (
+      {showStartChat ? (
         <div className="mb-4 flex justify-center">
           <Button 
             onClick={handleStartChat}
@@ -80,7 +81,7 @@ const ChatControls: React.FC<ChatControlsProps> = ({
             disabled={isLoading}
           >
             <MessageCircle className="h-4 w-4" />
-            Start Chat with {selectedBookTitle}
+            {selectedBookId ? `Start Chat with ${selectedBookTitle}` : "Start General Chat"}
           </Button>
         </div>
       ) : null}
@@ -89,8 +90,8 @@ const ChatControls: React.FC<ChatControlsProps> = ({
         onSubmit={onSubmit} 
         isLoading={isLoading} 
         suggestions={dynamicSuggestions}
-        disabled={!selectedBookId}
-        placeholderText={selectedBookId ? "Ask a question about this book..." : "Select a book to start chatting..."}
+        disabled={isLoading}
+        placeholderText={selectedBookId ? "Ask a question about this book..." : "Ask me anything..."}
         value={inputValue}
         onChange={setInputValue}
       />

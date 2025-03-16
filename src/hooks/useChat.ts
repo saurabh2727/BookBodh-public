@@ -8,7 +8,7 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: uuidv4(),
-      content: "Hello! I'm BookBodh, your AI assistant. Please select a book to start chatting.",
+      content: "Hello! I'm BookBodh, your AI assistant. I can help you chat about books or answer general questions.",
       type: 'bot',
       timestamp: new Date(),
     },
@@ -55,18 +55,6 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
       } else {
         // Reset when no book ID is selected
         setBookChunks([]);
-        
-        // Reset the welcome message if no book is selected
-        if (messages.length > 1) {
-          setMessages([
-            {
-              id: uuidv4(),
-              content: "Hello! I'm BookBodh, your AI assistant. Please select a book to start chatting.",
-              type: 'bot',
-              timestamp: new Date(),
-            }
-          ]);
-        }
       }
     };
 
@@ -76,12 +64,6 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
   const handleSubmit = async (query: string) => {
     if (!query.trim() || isLoading) return;
     
-    // Check if a book is selected
-    if (!selectedBookId) {
-      setError('Please select a book before chatting.');
-      return;
-    }
-
     // Reset any previous errors
     setError(null);
 
