@@ -88,7 +88,7 @@ async function extractTextFromPDF(buffer: ArrayBuffer) {
              .replace(/\s+/g, ' ')
              .trim();
   
-  // If we still didn't get much text, return a placeholder for testing
+  // If we still didn't get much text, return placeholder text for testing
   if (text.trim().length < 100) {
     console.log("Warning: Could not extract sufficient text from PDF. Using placeholder text.");
     text = `This is placeholder text for ${new Date().toISOString()}. The PDF extraction was not successful, but this allows testing the rest of the pipeline. In a production environment, you would want to use a more robust PDF parsing library compatible with Deno.`;

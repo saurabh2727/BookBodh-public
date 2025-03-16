@@ -115,12 +115,16 @@ Aurelius consistently returns to the importance of accepting what cannot be chan
         Returns:
             Book ID
         """
+        # Generate a book ID
+        book_id = str(uuid.uuid4())
+        
         # Check if book already exists
         if title in self.books:
             title = f"{title} ({uuid.uuid4().hex[:8]})"
         
         # Add book to database
         self.books[title] = {
+            "id": book_id,
             "author": author,
             "content": content
         }
@@ -145,13 +149,14 @@ Aurelius consistently returns to the importance of accepting what cannot be chan
                 chunk_text = ' '.join(chunk_words)
                 self.chunks.append({
                     "id": chunk_id,
+                    "book_id": book_id,
                     "title": title,
                     "author": author,
                     "text": chunk_text
                 })
                 chunk_id += 1
         
-        return title
+        return book_id
     
     def get_all_chunks(self) -> List[Dict]:
         """Return all text chunks with metadata"""
@@ -168,6 +173,28 @@ Aurelius consistently returns to the importance of accepting what cannot be chan
         """Get all chunks for a specific book title"""
         return [chunk for chunk in self.chunks if chunk["title"] == book_title]
     
+    def get_chunks_by_book_id(self, book_id: str) -> List[Dict]:
+        """Get all chunks for a specific book ID"""
+        # Add debug print
+        print(f"Looking for chunks with book_id: {book_id}")
+        
+        # Find chunks with this book_id
+        chunks = [chunk for chunk in self.chunks if chunk.get("book_id") == book_id]
+        
+        # If no chunks found, try to fetch from Supabase
+        if not chunks:
+            print(f"No chunks found in memory for book_id: {book_id}")
+            try:
+                # This is where we would add Supabase integration if needed
+                # For now, just log a message
+                print("Would fetch chunks from database here if integrated")
+            except Exception as e:
+                print(f"Error fetching chunks from database: {e}")
+        
+        print(f"Found {len(chunks)} chunks for book_id: {book_id}")
+        return chunks
+    
     def get_books(self) -> List[Dict]:
         """Get list of all books with metadata"""
-        return [{"title": title, "author": data["author"]} for title, data in self.books.items()]
+        return [{"title": title, "author": data["author"], "id": data.get("id", str(uuid.uuid4()))} 
+                for title, data in self.books.items()]
