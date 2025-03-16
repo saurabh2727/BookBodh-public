@@ -1,4 +1,3 @@
-
 import { ChatRequest, ChatResponse, Book } from '../types';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -19,21 +18,29 @@ export const sendChatRequest = async (request: ChatRequest): Promise<ChatRespons
       throw new Error('User not authenticated');
     }
     
-    const { data, error } = await supabase.functions.invoke('chat-response', {
-      method: 'POST',
-      body: request,
-      headers: {
-        Authorization: `Bearer ${session.access_token}`,
-      },
-    });
+    console.log('Got session, access token length:', session.access_token.length);
+    
+    try {
+      const { data, error } = await supabase.functions.invoke('chat-response', {
+        method: 'POST',
+        body: request,
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
 
-    if (error) {
-      console.error('Edge function error:', error);
-      throw new Error(error.message || 'Error calling chat response function');
+      if (error) {
+        console.error('Edge function error:', error);
+        throw new Error(error.message || 'Error calling chat response function');
+      }
+
+      console.log('Server response:', data);
+      return data as ChatResponse;
+    } catch (invokeError) {
+      console.error('Error invoking Edge Function:', invokeError);
+      console.error('Error details:', JSON.stringify(invokeError, null, 2));
+      throw new Error(`Failed to invoke Edge Function: ${invokeError.message}`);
     }
-
-    console.log('Server response:', data);
-    return data as ChatResponse;
   } catch (error) {
     console.error('Chat request error:', error);
     throw error;
@@ -56,6 +63,11 @@ export const uploadBook = async (
 ): Promise<{ success: boolean; message: string; bookId?: string; fileUrl?: string }> => {
   try {
     console.log('Uploading book to Supabase Edge Function');
+    console.log('File details:', {
+      name: file.name,
+      type: file.type,
+      size: file.size
+    });
     
     // Get the current session
     const { data: { session } } = await supabase.auth.getSession();
@@ -64,6 +76,8 @@ export const uploadBook = async (
       throw new Error('User not authenticated');
     }
     
+    console.log('Session obtained, token length:', session.access_token.length);
+    
     // Create a FormData object
     const formData = new FormData();
     formData.append('file', file);
@@ -71,24 +85,40 @@ export const uploadBook = async (
     formData.append('author', author);
     formData.append('category', category);
     
-    // Call the upload-book edge function
-    const { data, error } = await supabase.functions.invoke('upload-book', {
-      method: 'POST',
-      body: formData,
-      headers: {
-        Authorization: `Bearer ${session.access_token}`,
-      },
+    console.log('FormData created with fields:', {
+      title,
+      author,
+      category,
+      fileEntryName: file.name
     });
+    
+    try {
+      // Call the upload-book edge function
+      console.log('Invoking upload-book edge function...');
+      const { data, error } = await supabase.functions.invoke('upload-book', {
+        method: 'POST',
+        body: formData,
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
 
-    if (error) {
-      console.error('Edge function error:', error);
-      throw new Error(error.message || 'Error uploading book');
+      if (error) {
+        console.error('Edge function error:', error);
+        console.error('Error details:', JSON.stringify(error, null, 2));
+        throw new Error(error.message || 'Error uploading book');
+      }
+
+      console.log('Upload response:', data);
+      return data;
+    } catch (invokeError) {
+      console.error('Error invoking Edge Function:', invokeError);
+      console.error('Error details:', JSON.stringify(invokeError, null, 2));
+      throw new Error(`Failed to send a request to the Edge Function: ${invokeError.message}`);
     }
-
-    console.log('Upload response:', data);
-    return data;
   } catch (error) {
     console.error('Book upload error:', error);
+    console.error('Error details:', JSON.stringify(error, null, 2));
     throw error;
   }
 };

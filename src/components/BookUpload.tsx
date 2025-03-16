@@ -10,8 +10,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Loader2 } from 'lucide-react';
+import { Loader2, AlertCircle } from 'lucide-react';
 import { uploadBook } from '@/services/api';
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 interface BookUploadProps {
   onClose: () => void;
@@ -25,6 +26,7 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
   const [category, setCategory] = useState<string>('Non-Fiction');
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [detailedError, setDetailedError] = useState<string | null>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -41,6 +43,7 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
       
       setFile(selectedFile);
       setError(null);
+      setDetailedError(null);
       
       // Try to extract title from filename if not set
       if (!title) {
@@ -76,6 +79,7 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
     try {
       setIsUploading(true);
       setError(null);
+      setDetailedError(null);
       
       console.log('Uploading book with details:', {
         title,
@@ -96,7 +100,8 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
     } catch (error) {
       console.error('Error uploading book:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      setError(errorMessage);
+      setError('Upload failed. Please try again.');
+      setDetailedError(errorMessage);
       onUploadComplete(false, errorMessage);
     } finally {
       setIsUploading(false);
@@ -161,9 +166,21 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
       </div>
       
       {error && (
-        <div className="bg-destructive/10 text-destructive p-3 rounded-md text-sm">
-          {error}
-        </div>
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Error</AlertTitle>
+          <AlertDescription>
+            {error}
+            {detailedError && (
+              <details className="mt-2 text-xs">
+                <summary>Technical details</summary>
+                <pre className="mt-2 w-full overflow-auto text-xs whitespace-pre-wrap">
+                  {detailedError}
+                </pre>
+              </details>
+            )}
+          </AlertDescription>
+        </Alert>
       )}
       
       <div className="flex justify-end gap-2 pt-2">

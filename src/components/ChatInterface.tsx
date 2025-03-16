@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import BookSelector from './BookSelector';
 import ChatWelcome from './chat/ChatWelcome';
@@ -78,7 +77,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedBookId }) => {
           description: "The book and its data have been removed successfully.",
         });
         
-        // Navigate back to general chat
         navigate('/chat');
         setSelectedBook(null);
       } else {
@@ -115,6 +113,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedBookId }) => {
         variant: "destructive",
         title: "Upload failed",
         description: message,
+        duration: 5000,
       });
     }
   };
@@ -155,7 +154,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedBookId }) => {
           });
         }
       } else {
-        // Reset selected book if no ID is provided
         setSelectedBook(null);
       }
     };
@@ -234,6 +232,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedBookId }) => {
           <SheetContent side="right" className="sm:max-w-md">
             <SheetHeader>
               <SheetTitle>Upload New Book</SheetTitle>
+              <div className="text-sm text-muted-foreground">
+                Upload a PDF file to chat with its contents
+              </div>
             </SheetHeader>
             <div className="mt-6">
               <BookUpload 
