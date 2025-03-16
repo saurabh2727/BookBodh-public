@@ -9,6 +9,77 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      book_chunks: {
+        Row: {
+          book_id: string
+          chunk_index: number
+          created_at: string
+          id: string
+          text: string
+          title: string
+        }
+        Insert: {
+          book_id: string
+          chunk_index: number
+          created_at?: string
+          id?: string
+          text: string
+          title: string
+        }
+        Update: {
+          book_id?: string
+          chunk_index?: number
+          created_at?: string
+          id?: string
+          text?: string
+          title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "book_chunks_book_id_fkey"
+            columns: ["book_id"]
+            isOneToOne: false
+            referencedRelation: "books"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      books: {
+        Row: {
+          author: string
+          category: string
+          created_at: string
+          file_url: string
+          icon_url: string | null
+          id: string
+          summary: string | null
+          title: string
+          user_id: string
+        }
+        Insert: {
+          author: string
+          category: string
+          created_at?: string
+          file_url: string
+          icon_url?: string | null
+          id?: string
+          summary?: string | null
+          title: string
+          user_id: string
+        }
+        Update: {
+          author?: string
+          category?: string
+          created_at?: string
+          file_url?: string
+          icon_url?: string | null
+          id?: string
+          summary?: string | null
+          title?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       chat_history: {
         Row: {
           author: string | null

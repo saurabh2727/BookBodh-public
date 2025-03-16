@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import BookSelector from './BookSelector';
 import ChatWelcome from './chat/ChatWelcome';
 import ChatMessages from './chat/ChatMessages';
@@ -9,14 +9,18 @@ import { Book } from '@/types';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Upload } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { fetchUserBooks } from '@/services/api';
 
 interface ChatInterfaceProps {
-  selectedBook: string | null;
+  selectedBookId?: string | null;
 }
 
-const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedBook }) => {
+const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedBookId }) => {
   const [showBookSelector, setShowBookSelector] = useState<boolean>(false);
   const [showBookUpload, setShowBookUpload] = useState<boolean>(false);
+  const [selectedBook, setSelectedBook] = useState<Book | null>(null);
+  const navigate = useNavigate();
   
   const {
     messages,
@@ -24,7 +28,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedBook }) => {
     chatMode,
     setChatMode,
     handleSubmit
-  } = useChat(selectedBook);
+  } = useChat(selectedBook?.title || null, selectedBookId);
 
   const handleSelectBookClick = () => {
     setShowBookSelector(true);
@@ -35,23 +39,47 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedBook }) => {
   };
 
   const handleBookSelection = (book: Book) => {
+    setSelectedBook(book);
     setShowBookSelector(false);
-    // Logic to load book would go here
+    
+    // Redirect to chat with the selected book
+    navigate(`/chat/${book.id}`);
   };
 
-  const handleUploadComplete = (success: boolean, message: string) => {
-    if (success) {
+  const handleUploadComplete = (success: boolean, message: string, bookId?: string) => {
+    if (success && bookId) {
       // Close the upload dialog after a delay to show the success message
       setTimeout(() => {
         setShowBookUpload(false);
+        // Navigate to chat with the newly uploaded book
+        navigate(`/chat/${bookId}`);
       }, 2000);
     }
     // Keep dialog open on failure so user can try again
   };
 
+  // Load book data if a book ID is provided
+  useEffect(() => {
+    const loadBookData = async () => {
+      if (selectedBookId) {
+        try {
+          const books = await fetchUserBooks();
+          const book = books.find(b => b.id === selectedBookId);
+          if (book) {
+            setSelectedBook(book);
+          }
+        } catch (error) {
+          console.error('Error loading book data:', error);
+        }
+      }
+    };
+
+    loadBookData();
+  }, [selectedBookId]);
+
   return (
     <div className="flex flex-col h-full">
-      {!selectedBook && messages.length <= 1 ? (
+      {!selectedBookId && messages.length <= 1 ? (
         <ChatWelcome
           onSelectBookClick={handleSelectBookClick}
           onChatModeChange={setChatMode}
@@ -61,7 +89,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedBook }) => {
         />
       ) : (
         <>
-          <div className="flex justify-end mb-4">
+          <div className="flex justify-between items-center mb-4">
+            {selectedBook && (
+              <div className="text-sm font-medium text-muted-foreground">
+                Chatting with: {selectedBook.title} by {selectedBook.author}
+              </div>
+            )}
             <Button 
               variant="outline" 
               size="sm" 

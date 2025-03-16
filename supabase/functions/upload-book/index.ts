@@ -1,4 +1,3 @@
-
 // Follow this setup locally:
 // 1. Run `npx supabase start` (after installing supabase-js SDK)
 // 2. Run `npx supabase functions serve upload-book`
@@ -13,6 +12,45 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '
 
 // Create a Supabase client with Admin privileges for file operations
 const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+// Simple text extraction function (simulated for now)
+// In a production environment, you would use a more robust PDF parsing library
+const extractTextFromPDF = (fileBuffer: Uint8Array): string => {
+  // Simple extraction - in production, use a proper PDF parser
+  // This is a placeholder that extracts readable text
+  const decoder = new TextDecoder('utf-8');
+  const text = decoder.decode(fileBuffer);
+  
+  // Extract text-like content (very simplified)
+  // Remove binary data and keep only printable ASCII characters
+  return text.replace(/[^\x20-\x7E\n\r\t]/g, '')
+    .replace(/[\x00-\x1F\x7F-\xFF]/g, '')
+    .trim();
+};
+
+// Function to chunk text by words
+const chunkText = (text: string, chunkSize = 500): string[] => {
+  const words = text.split(/\s+/);
+  const chunks: string[] = [];
+  
+  for (let i = 0; i < words.length; i += chunkSize) {
+    const chunkWords = words.slice(i, i + chunkSize);
+    if (chunkWords.length > 0) {
+      chunks.push(chunkWords.join(' '));
+    }
+  }
+  
+  return chunks;
+};
+
+// Generate a simple summary (placeholder)
+const generateSummary = (text: string): string => {
+  // In production, you would use an AI service for summarization
+  // This is a simplified placeholder
+  const words = text.split(/\s+/);
+  const firstFewWords = words.slice(0, 100).join(' ');
+  return `${firstFewWords}...`;
+};
 
 serve(async (req) => {
   // Handle CORS preflight requests
@@ -65,6 +103,21 @@ serve(async (req) => {
     // Parse the form data
     const formData = await req.formData();
     const file = formData.get('file');
+    const title = formData.get('title') as string || 'Untitled';
+    const author = formData.get('author') as string || 'Unknown';
+    const category = formData.get('category') as string || 'Uncategorized';
+    
+    // Validate category
+    const validCategories = ["Fiction", "Non-Fiction", "Philosophy", "Science", "History"];
+    if (!validCategories.includes(category)) {
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          error: `Invalid category. Must be one of: ${validCategories.join(', ')}` 
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
     
     if (!file || !(file instanceof File)) {
       return new Response(
@@ -101,8 +154,8 @@ serve(async (req) => {
         identities: ['authenticated'],
       });
     }
-
-    // Convert File to ArrayBuffer for upload
+    
+    // Convert File to ArrayBuffer for upload and processing
     const arrayBuffer = await file.arrayBuffer();
     const fileBuffer = new Uint8Array(arrayBuffer);
 
@@ -125,15 +178,74 @@ serve(async (req) => {
     // Generate URL for the uploaded file
     const { data: urlData } = await adminClient.storage
       .from('books')
-      .createSignedUrl(`${user.id}/${uniqueFilename}`, 60 * 60 * 24 * 7); // 7 days expiry
+      .createSignedUrl(`${user.id}/${uniqueFilename}`, 60 * 60 * 24 * 365); // 1 year expiry
 
-    // Extract text from the PDF (simplified - in production, this would be a more complex process)
-    // For now, we'll just return success with the file URL
+    // Create a placeholder icon URL (first page image)
+    // In production, you would extract the first page as an image
+    const iconFilename = `${user.id}-${Date.now()}-icon-${file.name}.png`;
+    const iconUrl = null; // For now, we leave this as null; in production, extract and upload first page
+    
+    // Extract text from PDF
+    console.log('Extracting text from PDF...');
+    const extractedText = extractTextFromPDF(fileBuffer);
+    
+    // Generate chunks
+    console.log('Generating text chunks...');
+    const textChunks = chunkText(extractedText);
+    
+    // Generate a summary
+    console.log('Generating summary...');
+    const summary = generateSummary(extractedText);
+    
+    // Insert book data into the database
+    console.log('Inserting book data into database...');
+    const { data: bookData, error: bookError } = await supabaseClient
+      .from('books')
+      .insert({
+        user_id: user.id,
+        title,
+        author,
+        category,
+        file_url: urlData?.signedUrl || '',
+        icon_url: iconUrl,
+        summary,
+      })
+      .select()
+      .single();
+      
+    if (bookError) {
+      console.error('Error inserting book:', bookError);
+      return new Response(
+        JSON.stringify({ success: false, error: `Error saving book metadata: ${bookError.message}` }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
+    // Insert text chunks
+    console.log('Inserting text chunks...');
+    const chunkInserts = textChunks.map((chunk, index) => ({
+      book_id: bookData.id,
+      chunk_index: index,
+      title: `${title} - Part ${index + 1}`,
+      text: chunk
+    }));
+    
+    if (chunkInserts.length > 0) {
+      const { error: chunksError } = await supabaseClient
+        .from('book_chunks')
+        .insert(chunkInserts);
+        
+      if (chunksError) {
+        console.error('Error inserting chunks:', chunksError);
+        // We don't fail the whole operation if chunks fail, but log it
+      }
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
-        message: `Book '${file.name}' uploaded successfully`,
-        filename: uniqueFilename,
+        message: `Book '${title}' by ${author} uploaded successfully`,
+        bookId: bookData.id,
         fileUrl: urlData?.signedUrl || null,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

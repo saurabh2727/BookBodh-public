@@ -1,3 +1,4 @@
+
 export type MessageType = 'user' | 'bot';
 
 export interface Citation {
@@ -22,10 +23,11 @@ export interface Book {
   genre: string;
   summary: string;
   coverColor: string;
-  imageUrl?: string; // Added for real book covers
+  imageUrl?: string;
+  fileUrl?: string;
 }
 
-export type BookGenre = 'Philosophy' | 'Ethics' | 'Self-Help' | 'Spirituality' | 'Psychology';
+export type BookGenre = 'Fiction' | 'Non-Fiction' | 'Philosophy' | 'Science' | 'History';
 
 // Chat mode types - unified definition
 export type ChatMode = 'general' | 'specific-book' | 'saved' | 'temp';
@@ -34,10 +36,24 @@ export type ChatMode = 'general' | 'specific-book' | 'saved' | 'temp';
 export interface ChatRequest {
   query: string;
   book?: string | null;
+  chunks?: Array<{
+    title: string;
+    author: string;
+    text: string;
+  }>;
 }
 
 export interface ChatResponse {
   response: string;
   book?: string | null;
   author?: string | null;
+}
+
+export interface BookChunk {
+  id: string;
+  book_id: string;
+  chunk_index: number;
+  title: string;
+  text: string;
+  created_at: string;
 }
