@@ -1,6 +1,6 @@
 
 import { ChatRequest, ChatResponse } from '../types';
-import { supabase } from '../lib/supabase';
+import { supabase } from '@/integrations/supabase/client';
 
 /**
  * Sends a chat request to the Supabase Edge Function
