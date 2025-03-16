@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { ModeToggle } from '@/components/ThemeToggle';
+import ThemeToggle from '@/components/ThemeToggle';
 import { Button } from '@/components/ui/button';
 import { LogOut } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
@@ -43,7 +43,7 @@ const Header: React.FC = () => {
             >
               <LogOut className="h-[1.2rem] w-[1.2rem]" />
             </Button>
-            <ModeToggle />
+            <ThemeToggle />
           </nav>
         </div>
       </div>
