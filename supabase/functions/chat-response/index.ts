@@ -11,10 +11,12 @@ const GROK_API_KEY = Deno.env.get('GROK_API_KEY') || 'gsk_1DFRUmESTfLtymOjeo5MWG
 interface RequestPayload {
   query: string;
   book?: string | null;
+  bookId?: string | null;
   chunks?: Array<{
     title: string;
     author: string;
     text: string;
+    summary?: string;
   }>;
 }
 
@@ -60,7 +62,7 @@ Deno.serve(async (req) => {
     }
 
     // Parse request body
-    const { query, book, chunks } = await req.json() as RequestPayload;
+    const { query, book, bookId, chunks: providedChunks } = await req.json() as RequestPayload;
 
     if (!query) {
       return new Response(
@@ -76,12 +78,91 @@ Deno.serve(async (req) => {
     let context = '';
     let bookTitle = null;
     let bookAuthor = null;
-    const book_citations = {};
+    let chunks = providedChunks || [];
+    
+    // If bookId is provided, fetch chunks from the database
+    if (bookId && !chunks.length) {
+      console.log(`Fetching chunks for book ID: ${bookId}`);
+      
+      // First get the book details
+      const { data: bookData, error: bookError } = await supabaseClient
+        .from('books')
+        .select('title, author')
+        .eq('id', bookId)
+        .single();
+        
+      if (bookError) {
+        console.error('Error fetching book:', bookError);
+        return new Response(
+          JSON.stringify({ error: `Error fetching book: ${bookError.message}` }),
+          {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+      
+      // Then get the chunks
+      const { data: chunkData, error: chunkError } = await supabaseClient
+        .from('book_chunks')
+        .select('chunk_index, title, text, summary')
+        .eq('book_id', bookId)
+        .order('chunk_index');
+        
+      if (chunkError) {
+        console.error('Error fetching chunks:', chunkError);
+        return new Response(
+          JSON.stringify({ error: `Error fetching chunks: ${chunkError.message}` }),
+          {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+      
+      if (chunkData && chunkData.length > 0) {
+        bookTitle = bookData.title;
+        bookAuthor = bookData.author;
+        
+        chunks = chunkData.map(chunk => ({
+          title: chunk.title,
+          author: bookAuthor,
+          text: chunk.text,
+          summary: chunk.summary
+        }));
+      }
+    }
+    // If no bookId and no chunks provided, fetch summaries from all books for general context
+    else if (!chunks.length && !bookId) {
+      console.log('Fetching summaries from all books for general chat');
+      
+      // Get all books with summaries
+      const { data: booksData, error: booksError } = await supabaseClient
+        .from('books')
+        .select('id, title, author, summary')
+        .filter('summary', 'not.is', null);
+        
+      if (booksError) {
+        console.error('Error fetching books:', booksError);
+      } else if (booksData && booksData.length > 0) {
+        for (const book of booksData) {
+          chunks.push({
+            title: book.title,
+            author: book.author,
+            text: book.summary || '',
+            summary: book.summary || ''
+          });
+        }
+      }
+    }
+
+    const book_citations: Record<string, string> = {};
 
     if (chunks && chunks.length > 0) {
       chunks.forEach((chunk, i) => {
-        context += `\nChunk ${i+1} from '${chunk.title}' by ${chunk.author}:\n${chunk.text}\n`;
-        // @ts-ignore
+        // Use the summary when available instead of full text for more concise context
+        const contentToUse = chunk.summary || chunk.text;
+        context += `\nChunk ${i+1} from '${chunk.title}' by ${chunk.author}:\n${contentToUse}\n`;
         book_citations[chunk.title] = chunk.author;
         
         // Use the first chunk's book info as the citation if not already set
@@ -127,7 +208,7 @@ Provide a thoughtful, well-reasoned response with quotations from the book where
     const grokData = await grokResponse.json() as ChatCompletion;
     const responseText = grokData.choices[0].message.content;
 
-    // Determine which book was cited (simple approach)
+    // Determine which book was cited
     let citedBook = bookTitle;
     let citedAuthor = bookAuthor;
 

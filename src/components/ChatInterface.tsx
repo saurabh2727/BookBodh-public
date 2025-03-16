@@ -63,6 +63,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedBookId }) => {
     const loadBookData = async () => {
       if (selectedBookId) {
         try {
+          console.log('Loading book data for book ID:', selectedBookId);
           const books = await fetchUserBooks();
           const book = books.find(b => b.id === selectedBookId);
           if (book) {
@@ -95,15 +96,25 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedBookId }) => {
                 Chatting with: {selectedBook.title} by {selectedBook.author}
               </div>
             )}
-            <Button 
-              variant="outline" 
-              size="sm" 
-              className="flex items-center gap-2"
-              onClick={handleUploadBookClick}
-            >
-              <Upload className="h-4 w-4" />
-              Upload Book
-            </Button>
+            <div className="flex gap-2">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="flex items-center gap-2"
+                onClick={handleSelectBookClick}
+              >
+                Select Book
+              </Button>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="flex items-center gap-2"
+                onClick={handleUploadBookClick}
+              >
+                <Upload className="h-4 w-4" />
+                Upload Book
+              </Button>
+            </div>
           </div>
           <ChatMessages messages={messages} />
           <ChatControls onSubmit={handleSubmit} isLoading={isLoading} />

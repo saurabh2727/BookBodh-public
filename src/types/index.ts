@@ -36,10 +36,12 @@ export type ChatMode = 'general' | 'specific-book' | 'saved' | 'temp';
 export interface ChatRequest {
   query: string;
   book?: string | null;
+  bookId?: string | null;
   chunks?: Array<{
     title: string;
     author: string;
     text: string;
+    summary?: string;
   }>;
 }
 
@@ -55,5 +57,6 @@ export interface BookChunk {
   chunk_index: number;
   title: string;
   text: string;
+  summary?: string;
   created_at: string;
 }

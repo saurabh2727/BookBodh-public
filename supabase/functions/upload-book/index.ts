@@ -13,43 +13,77 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '
 // Create a Supabase client with Admin privileges for file operations
 const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-// Simple text extraction function (simulated for now)
-// In a production environment, you would use a more robust PDF parsing library
+// Improved text extraction function
 const extractTextFromPDF = (fileBuffer: Uint8Array): string => {
   // Simple extraction - in production, use a proper PDF parser
-  // This is a placeholder that extracts readable text
   const decoder = new TextDecoder('utf-8');
-  const text = decoder.decode(fileBuffer);
+  let text = decoder.decode(fileBuffer);
   
-  // Extract text-like content (very simplified)
-  // Remove binary data and keep only printable ASCII characters
-  return text.replace(/[^\x20-\x7E\n\r\t]/g, '')
-    .replace(/[\x00-\x1F\x7F-\xFF]/g, '')
-    .trim();
+  // Remove PDF header/metadata markers (like %PDF-1.x)
+  text = text.replace(/%PDF-\d+\.\d+.*?(?=\n\n)/s, '');
+  
+  // Extract only readable text by:
+  // 1. Remove binary data and non-printable ASCII characters
+  text = text.replace(/[^\x20-\x7E\n\r\t]/g, '')
+    .replace(/[\x00-\x1F\x7F-\xFF]/g, '');
+    
+  // 2. Remove PDF-specific commands and objects
+  text = text.replace(/\/\w+\s+\d+\s+\d+\s+R/g, '')
+             .replace(/\d+\s+\d+\s+obj.*?endobj/gs, '')
+             .replace(/<<.*?>>/gs, '')
+             .replace(/stream.*?endstream/gs, '');
+             
+  // 3. Clean up whitespace (multiple spaces, newlines)
+  text = text.replace(/\s+/g, ' ')
+             .replace(/\s+\./g, '.')
+             .replace(/\s+,/g, ',')
+             .trim();
+             
+  return text;
 };
 
-// Function to chunk text by words
+// Function to chunk text by words with improved handling
 const chunkText = (text: string, chunkSize = 500): string[] => {
-  const words = text.split(/\s+/);
+  // Split by sentence boundaries when possible
+  const sentences = text.replace(/([.!?])\s+/g, '$1|').split('|');
   const chunks: string[] = [];
+  let currentChunk = '';
   
-  for (let i = 0; i < words.length; i += chunkSize) {
-    const chunkWords = words.slice(i, i + chunkSize);
-    if (chunkWords.length > 0) {
-      chunks.push(chunkWords.join(' '));
+  for (const sentence of sentences) {
+    // If adding this sentence would exceed chunk size, save current chunk and start new one
+    if (currentChunk.split(/\s+/).length + sentence.split(/\s+/).length > chunkSize && currentChunk) {
+      chunks.push(currentChunk.trim());
+      currentChunk = '';
     }
+    
+    currentChunk += (currentChunk ? ' ' : '') + sentence;
+    
+    // If current chunk is getting too large, save it even without a sentence boundary
+    if (currentChunk.split(/\s+/).length >= chunkSize) {
+      chunks.push(currentChunk.trim());
+      currentChunk = '';
+    }
+  }
+  
+  // Add the last chunk if there's anything left
+  if (currentChunk.trim()) {
+    chunks.push(currentChunk.trim());
   }
   
   return chunks;
 };
 
-// Generate a simple summary (placeholder)
-const generateSummary = (text: string): string => {
-  // In production, you would use an AI service for summarization
-  // This is a simplified placeholder
+// Generate a summary for a chunk of text
+const generateSummary = (text: string, maxWords = 50): string => {
+  // Find the first complete sentence if possible
+  const sentenceMatch = text.match(/^.*?[.!?]\s/);
+  if (sentenceMatch && sentenceMatch[0].split(/\s+/).length <= maxWords) {
+    return sentenceMatch[0].trim();
+  }
+  
+  // Otherwise, use the first maxWords words
   const words = text.split(/\s+/);
-  const firstFewWords = words.slice(0, 100).join(' ');
-  return `${firstFewWords}...`;
+  return words.slice(0, maxWords).join(' ') + (words.length > maxWords ? '...' : '');
 };
 
 serve(async (req) => {
@@ -137,30 +171,13 @@ serve(async (req) => {
     // Create a unique filename
     const uniqueFilename = `${user.id}-${Date.now()}-${file.name}`;
     
-    // Ensure the books bucket exists (create it if it doesn't)
-    const { data: buckets } = await adminClient.storage.listBuckets();
-    const booksBucketExists = buckets?.some(bucket => bucket.name === 'books');
-    
-    if (!booksBucketExists) {
-      await adminClient.storage.createBucket('books', {
-        public: false, // Keep files private
-      });
-      
-      // Set up RLS policy to allow authenticated users to access their own files
-      await adminClient.storage.from('books').createPolicy('books_policy', {
-        name: 'Only the owner can access their files',
-        definition: "((storage.foldername(name))[1] = auth.uid())",
-        allow: 'insert,update,select,delete',
-        identities: ['authenticated'],
-      });
-    }
-    
     // Convert File to ArrayBuffer for upload and processing
     const arrayBuffer = await file.arrayBuffer();
     const fileBuffer = new Uint8Array(arrayBuffer);
 
     // Upload the file to Supabase Storage
-    const { data: uploadData, error: uploadError } = await adminClient.storage
+    console.log('Uploading file to storage...');
+    const { data: uploadData, error: uploadError } = await supabaseClient.storage
       .from('books')
       .upload(`${user.id}/${uniqueFilename}`, fileBuffer, {
         contentType: file.type,
@@ -176,7 +193,7 @@ serve(async (req) => {
     }
 
     // Generate URL for the uploaded file
-    const { data: urlData } = await adminClient.storage
+    const { data: urlData } = await supabaseClient.storage
       .from('books')
       .createSignedUrl(`${user.id}/${uniqueFilename}`, 60 * 60 * 24 * 365); // 1 year expiry
 
@@ -185,17 +202,17 @@ serve(async (req) => {
     const iconFilename = `${user.id}-${Date.now()}-icon-${file.name}.png`;
     const iconUrl = null; // For now, we leave this as null; in production, extract and upload first page
     
-    // Extract text from PDF
+    // Extract text from PDF with improved method
     console.log('Extracting text from PDF...');
     const extractedText = extractTextFromPDF(fileBuffer);
     
-    // Generate chunks
+    // Generate chunks with improved method
     console.log('Generating text chunks...');
     const textChunks = chunkText(extractedText);
     
-    // Generate a summary
-    console.log('Generating summary...');
-    const summary = generateSummary(extractedText);
+    // Generate a summary for the whole book
+    console.log('Generating book summary...');
+    const wholeSummary = generateSummary(extractedText, 100);
     
     // Insert book data into the database
     console.log('Inserting book data into database...');
@@ -208,7 +225,7 @@ serve(async (req) => {
         category,
         file_url: urlData?.signedUrl || '',
         icon_url: iconUrl,
-        summary,
+        summary: wholeSummary,
       })
       .select()
       .single();
@@ -221,14 +238,18 @@ serve(async (req) => {
       );
     }
     
-    // Insert text chunks
+    // Insert text chunks with summaries
     console.log('Inserting text chunks...');
-    const chunkInserts = textChunks.map((chunk, index) => ({
-      book_id: bookData.id,
-      chunk_index: index,
-      title: `${title} - Part ${index + 1}`,
-      text: chunk
-    }));
+    const chunkInserts = textChunks.map((chunk, index) => {
+      const chunkSummary = generateSummary(chunk, 50);
+      return {
+        book_id: bookData.id,
+        chunk_index: index,
+        title: `${title} - Part ${index + 1}`,
+        text: chunk,
+        summary: chunkSummary
+      };
+    });
     
     if (chunkInserts.length > 0) {
       const { error: chunksError } = await supabaseClient

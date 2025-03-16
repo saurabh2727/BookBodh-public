@@ -27,6 +27,7 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
     const loadBookChunks = async () => {
       if (selectedBookId) {
         try {
+          console.log('Fetching book chunks for:', selectedBookId);
           const chunks = await fetchBookChunks(selectedBookId);
           setBookChunks(chunks);
           // When chunks are loaded, set mode to specific-book
@@ -71,15 +72,18 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
       const requestPayload = {
         query,
         book: selectedBook,
+        bookId: selectedBookId,
         chunks: chatMode === 'specific-book' && bookChunks.length > 0 
           ? bookChunks.map(chunk => ({
               title: chunk.title,
               author: selectedBook || 'Unknown',
-              text: chunk.text
+              text: chunk.text,
+              summary: chunk.summary
             }))
           : undefined
       };
 
+      console.log('Sending chat request with payload:', requestPayload);
       const response = await sendChatRequest(requestPayload);
 
       // Replace loading message with response

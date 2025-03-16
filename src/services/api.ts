@@ -4,7 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 
 /**
  * Sends a chat request to the Supabase Edge Function
- * @param request The chat request with query and optional book
+ * @param request The chat request with query and optional book/bookId
  * @returns Promise with the chat response
  */
 export const sendChatRequest = async (request: ChatRequest): Promise<ChatResponse> => {
@@ -138,6 +138,7 @@ export const fetchUserBooks = async (): Promise<Book[]> => {
  */
 export const fetchBookChunks = async (bookId: string) => {
   try {
+    console.log('Fetching book chunks for book ID:', bookId);
     const { data, error } = await supabase
       .from('book_chunks')
       .select('*')
@@ -148,6 +149,7 @@ export const fetchBookChunks = async (bookId: string) => {
       throw new Error(error.message || 'Error fetching book chunks');
     }
     
+    console.log(`Fetched ${data.length} chunks`);
     return data;
   } catch (error) {
     console.error('Error fetching book chunks:', error);
