@@ -11,15 +11,22 @@ import {
 import { Button } from '@/components/ui/button';
 import { Book } from '@/types';
 import { BookOpen, MessageCircle } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 interface BookModalProps {
   book: Book;
   isOpen: boolean;
   onClose: () => void;
-  onChatWithBook: () => void;
 }
 
-const BookModal: React.FC<BookModalProps> = ({ book, isOpen, onClose, onChatWithBook }) => {
+const BookModal: React.FC<BookModalProps> = ({ book, isOpen, onClose }) => {
+  const navigate = useNavigate();
+  
+  const handleChatWithBook = () => {
+    navigate(`/chat/${book.id}`);
+    onClose();
+  };
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-md">
@@ -55,7 +62,7 @@ const BookModal: React.FC<BookModalProps> = ({ book, isOpen, onClose, onChatWith
         
         <DialogFooter>
           <Button 
-            onClick={onChatWithBook}
+            onClick={handleChatWithBook}
             className="w-full gap-2"
           >
             <MessageCircle className="h-4 w-4" />

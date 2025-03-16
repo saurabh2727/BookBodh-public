@@ -1,3 +1,4 @@
+
 // Follow this setup locally:
 // 1. Run `npx supabase start` (after installing supabase-js SDK)
 // 2. Run `npx supabase functions serve upload-book`
@@ -5,6 +6,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
+import * as pdfjs from "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/+esm";
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') || '';
@@ -13,43 +15,107 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '
 // Create a Supabase client with Admin privileges for file operations
 const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-// Improved text extraction function
-const extractTextFromPDF = (fileBuffer: Uint8Array): string => {
-  // Simple extraction - in production, use a proper PDF parser
-  const decoder = new TextDecoder('utf-8');
-  let text = decoder.decode(fileBuffer);
-  
-  // Remove PDF header/metadata markers (like %PDF-1.x)
-  text = text.replace(/%PDF-\d+\.\d+.*?(?=\n\n)/s, '');
-  
-  // Extract only readable text by:
-  // 1. Remove binary data and non-printable ASCII characters
-  text = text.replace(/[^\x20-\x7E\n\r\t]/g, '')
-    .replace(/[\x00-\x1F\x7F-\xFF]/g, '');
+// Extract text from PDF using pdfjs
+const extractTextFromPDF = async (fileBuffer: Uint8Array): Promise<string> => {
+  console.log('Starting PDF text extraction');
+  try {
+    // Initialize PDF.js
+    const loadingTask = pdfjs.getDocument({ data: fileBuffer });
+    const pdf = await loadingTask.promise;
+    console.log(`PDF loaded successfully with ${pdf.numPages} pages`);
     
-  // 2. Remove PDF-specific commands and objects
-  text = text.replace(/\/\w+\s+\d+\s+\d+\s+R/g, '')
-             .replace(/\d+\s+\d+\s+obj.*?endobj/gs, '')
-             .replace(/<<.*?>>/gs, '')
-             .replace(/stream.*?endstream/gs, '');
-             
-  // 3. Clean up whitespace (multiple spaces, newlines)
-  text = text.replace(/\s+/g, ' ')
-             .replace(/\s+\./g, '.')
-             .replace(/\s+,/g, ',')
-             .trim();
-             
-  return text;
+    let fullText = '';
+    
+    // Extract text from each page
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const textContent = await page.getTextContent();
+      
+      // Combine text items into a single string with proper spacing
+      const pageText = textContent.items
+        .map((item: any) => item.str)
+        .join(' ')
+        .replace(/\s+/g, ' ');
+      
+      fullText += pageText + ' ';
+      
+      if (i % 10 === 0 || i === pdf.numPages) {
+        console.log(`Processed ${i}/${pdf.numPages} pages`);
+      }
+    }
+    
+    // Clean up the text
+    fullText = fullText
+      .trim()
+      .replace(/\s+/g, ' ')         // Normalize whitespace
+      .replace(/(\w)-\s(\w)/g, '$1$2') // Remove hyphenation at line breaks
+      .replace(/&#172;/g, '¬')      // Fix common character issues
+      .replace(/&#163;/g, '£')
+      .replace(/&#128;/g, '€')
+      .replace(/\n{3,}/g, '\n\n');  // Normalize multiple newlines
+    
+    console.log(`Extracted ${fullText.length} characters of text`);
+    return fullText;
+  } catch (error) {
+    console.error('Error extracting PDF text:', error);
+    return '';
+  }
+};
+
+// Function to extract the first page of a PDF as an image
+const extractFirstPageAsImage = async (fileBuffer: Uint8Array): Promise<Uint8Array | null> => {
+  try {
+    console.log('Extracting first page as image');
+    // Initialize PDF.js
+    const loadingTask = pdfjs.getDocument({ data: fileBuffer });
+    const pdf = await loadingTask.promise;
+    
+    if (pdf.numPages === 0) {
+      console.warn('PDF has no pages');
+      return null;
+    }
+    
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewport({ scale: 1.0 });
+    
+    // Create a canvas to render the page
+    const canvas = new OffscreenCanvas(viewport.width, viewport.height);
+    const context = canvas.getContext('2d');
+    
+    if (!context) {
+      console.warn('Could not get canvas context');
+      return null;
+    }
+    
+    // Render PDF page to canvas
+    await page.render({
+      canvasContext: context,
+      viewport: viewport
+    }).promise;
+    
+    // Convert canvas to PNG
+    const blob = await canvas.convertToBlob({ type: 'image/png' });
+    const arrayBuffer = await blob.arrayBuffer();
+    
+    console.log('First page extracted as image successfully');
+    return new Uint8Array(arrayBuffer);
+  } catch (error) {
+    console.error('Error extracting first page as image:', error);
+    return null;
+  }
 };
 
 // Function to chunk text by words with improved handling
 const chunkText = (text: string, chunkSize = 500): string[] => {
+  console.log(`Chunking text into segments of ~${chunkSize} words`);
   // Split by sentence boundaries when possible
   const sentences = text.replace(/([.!?])\s+/g, '$1|').split('|');
   const chunks: string[] = [];
   let currentChunk = '';
   
   for (const sentence of sentences) {
+    if (!sentence.trim()) continue;
+    
     // If adding this sentence would exceed chunk size, save current chunk and start new one
     if (currentChunk.split(/\s+/).length + sentence.split(/\s+/).length > chunkSize && currentChunk) {
       chunks.push(currentChunk.trim());
@@ -70,20 +136,36 @@ const chunkText = (text: string, chunkSize = 500): string[] => {
     chunks.push(currentChunk.trim());
   }
   
+  console.log(`Created ${chunks.length} chunks`);
   return chunks;
 };
 
 // Generate a summary for a chunk of text
 const generateSummary = (text: string, maxWords = 50): string => {
-  // Find the first complete sentence if possible
-  const sentenceMatch = text.match(/^.*?[.!?]\s/);
-  if (sentenceMatch && sentenceMatch[0].split(/\s+/).length <= maxWords) {
-    return sentenceMatch[0].trim();
+  // Find the first few complete sentences if possible
+  const sentencePattern = /^.+?[.!?](?:\s|$)/g;
+  const sentences = text.match(sentencePattern) || [];
+  
+  let summary = '';
+  let wordCount = 0;
+  
+  for (const sentence of sentences) {
+    const sentenceWordCount = sentence.split(/\s+/).length;
+    if (wordCount + sentenceWordCount <= maxWords) {
+      summary += sentence;
+      wordCount += sentenceWordCount;
+    } else {
+      break;
+    }
   }
   
-  // Otherwise, use the first maxWords words
-  const words = text.split(/\s+/);
-  return words.slice(0, maxWords).join(' ') + (words.length > maxWords ? '...' : '');
+  // If we couldn't get enough complete sentences, just use the first maxWords
+  if (wordCount < maxWords / 2) {
+    const words = text.split(/\s+/);
+    summary = words.slice(0, maxWords).join(' ') + (words.length > maxWords ? '...' : '');
+  }
+  
+  return summary.trim();
 };
 
 serve(async (req) => {
@@ -161,15 +243,18 @@ serve(async (req) => {
     }
 
     // Validate file type (PDF only)
-    if (!file.name.toLowerCase().endsWith('.pdf')) {
+    if (!file.filename || !file.filename.toLowerCase().endsWith('.pdf')) {
       return new Response(
         JSON.stringify({ success: false, error: 'Only PDF files are allowed' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Create a unique filename
+    // Create a unique filename to prevent overwriting
     const uniqueFilename = `${user.id}-${Date.now()}-${file.name}`;
+    const filePath = `${user.id}/${uniqueFilename}`;
+    
+    console.log(`Processing file: ${file.name} (${file.size} bytes)`);
     
     // Convert File to ArrayBuffer for upload and processing
     const arrayBuffer = await file.arrayBuffer();
@@ -179,7 +264,7 @@ serve(async (req) => {
     console.log('Uploading file to storage...');
     const { data: uploadData, error: uploadError } = await supabaseClient.storage
       .from('books')
-      .upload(`${user.id}/${uniqueFilename}`, fileBuffer, {
+      .upload(filePath, fileBuffer, {
         contentType: file.type,
         upsert: true,
       });
@@ -195,16 +280,51 @@ serve(async (req) => {
     // Generate URL for the uploaded file
     const { data: urlData } = await supabaseClient.storage
       .from('books')
-      .createSignedUrl(`${user.id}/${uniqueFilename}`, 60 * 60 * 24 * 365); // 1 year expiry
+      .createSignedUrl(filePath, 60 * 60 * 24 * 365); // 1 year expiry
 
-    // Create a placeholder icon URL (first page image)
-    // In production, you would extract the first page as an image
-    const iconFilename = `${user.id}-${Date.now()}-icon-${file.name}.png`;
-    const iconUrl = null; // For now, we leave this as null; in production, extract and upload first page
+    // Extract the first page as an image and upload as book icon
+    console.log('Extracting book cover...');
+    const iconBuffer = await extractFirstPageAsImage(fileBuffer);
+    let iconUrl = null;
+    
+    if (iconBuffer) {
+      const iconFilename = `${user.id}-${Date.now()}-icon-${file.name.replace('.pdf', '.png')}`;
+      const iconPath = `${user.id}/${iconFilename}`;
+      
+      const { data: iconUploadData, error: iconUploadError } = await supabaseClient.storage
+        .from('books')
+        .upload(iconPath, iconBuffer, {
+          contentType: 'image/png',
+          upsert: true,
+        });
+        
+      if (!iconUploadError) {
+        const { data: iconUrlData } = await supabaseClient.storage
+          .from('books')
+          .createSignedUrl(iconPath, 60 * 60 * 24 * 365); // 1 year expiry
+          
+        if (iconUrlData) {
+          iconUrl = iconUrlData.signedUrl;
+          console.log('Book cover uploaded successfully');
+        }
+      } else {
+        console.warn('Failed to upload book cover:', iconUploadError);
+      }
+    } else {
+      console.warn('Could not extract book cover');
+    }
     
     // Extract text from PDF with improved method
     console.log('Extracting text from PDF...');
-    const extractedText = extractTextFromPDF(fileBuffer);
+    const extractedText = await extractTextFromPDF(fileBuffer);
+    
+    if (!extractedText || extractedText.length < 100) {
+      console.error('Failed to extract meaningful text from PDF');
+      return new Response(
+        JSON.stringify({ success: false, error: 'Could not extract readable text from the PDF' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
     
     // Generate chunks with improved method
     console.log('Generating text chunks...');
