@@ -1,103 +1,130 @@
 
-// Follow this setup locally:
-// 1. Run `npx supabase start` (after installing supabase-js SDK)
-// 2. Run `npx supabase functions serve upload-book`
+// Follow the steps below to run locally:
+// 1. deno install -Arf -n supabase https://deno.land/x/supabase/cli/bin/supabase.ts
+// 2. supabase functions serve upload-book --no-verify-jwt
 
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders } from "../_shared/cors.ts";
-import * as pdfjs from "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/+esm";
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { v4 as uuidv4 } from 'https://esm.sh/uuid@9';
+import { corsHeaders } from '../_shared/cors.ts';
+import * as pdfjs from 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.269/build/pdf.min.mjs';
 
-const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
-const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') || '';
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+// Support for browsers to run the PDF.js properly
+// @ts-ignore: Required for PDF.js to work
+globalThis.XMLHttpRequest = XMLHttpRequest;
+globalThis.DOMParser = DOMParser;
 
-// Create a Supabase client with Admin privileges for file operations
-const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+// Initialize PDF.js worker
+pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.269/build/pdf.worker.min.mjs';
 
-// Extract text from PDF using pdfjs
-const extractTextFromPDF = async (fileBuffer: Uint8Array): Promise<string> => {
-  console.log('Starting improved PDF text extraction');
+// Service role key needed for storage operations
+const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+const supabaseUrl = Deno.env.get('SUPABASE_URL');
+
+if (!serviceRoleKey || !supabaseUrl) {
+  console.error('Missing Supabase environment variables');
+}
+
+// Constants for the chunking process
+const CHUNK_SIZE = 2000; // Characters per chunk
+const CHUNK_OVERLAP = 200; // Overlap between chunks to maintain context
+
+// Main function to chunk the text
+const chunkText = (text: string): string[] => {
+  if (!text || text.length === 0) {
+    console.warn('Cannot chunk empty text');
+    return [];
+  }
+  
+  // Clean the text by removing excessive newlines and spaces
+  text = text.replace(/\n{3,}/g, '\n\n').trim();
+  
+  const chunks: string[] = [];
+  let i = 0;
+  
+  while (i < text.length) {
+    // Get the chunk with potential overlap
+    let chunkEnd = Math.min(i + CHUNK_SIZE, text.length);
+    
+    // Try to find a good breaking point (end of sentence)
+    if (chunkEnd < text.length) {
+      // Look for sentence boundaries (., !, ?) followed by space or newline
+      const match = text.substring(chunkEnd - 50, chunkEnd + 50).match(/[.!?]\s+/);
+      if (match && match.index !== undefined) {
+        // Adjust chunkEnd to end at a sentence boundary
+        chunkEnd = chunkEnd - 50 + match.index + 1;
+      }
+    }
+    
+    // Add the chunk to our array
+    chunks.push(text.substring(i, chunkEnd).trim());
+    
+    // Move to the next chunk, accounting for overlap
+    i = chunkEnd - CHUNK_OVERLAP;
+    
+    // Ensure we're making progress
+    if (i <= 0) {
+      console.error('Chunking algorithm error: no progress being made');
+      break;
+    }
+  }
+  
+  return chunks;
+};
+
+// Process a PDF file and extract its text
+const extractPdfText = async (fileBuffer: Uint8Array): Promise<string> => {
+  console.log('Extracting text from PDF, buffer size:', fileBuffer.length);
+  
   try {
-    // Initialize PDF.js
-    const loadingTask = pdfjs.getDocument({ data: fileBuffer });
-    const pdf = await loadingTask.promise;
-    console.log(`PDF loaded successfully with ${pdf.numPages} pages`);
+    console.time('PDF loading time');
+    const pdf = await pdfjs.getDocument({ data: fileBuffer }).promise;
+    console.timeEnd('PDF loading time');
+    
+    console.log(`PDF loaded successfully. Pages: ${pdf.numPages}`);
     
     let fullText = '';
+    const maxPages = Math.min(pdf.numPages, 100); // Limit to first 100 pages
     
     // Extract text from each page
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const textContent = await page.getTextContent();
-      
-      // Combine text items into a single string with proper spacing
-      const pageText = textContent.items
-        .filter((item: any) => 'str' in item && typeof item.str === 'string')
-        .map((item: any) => item.str)
-        .join(' ')
-        .replace(/\s+/g, ' ');
-      
-      fullText += pageText + ' ';
-      
-      if (i % 10 === 0 || i === pdf.numPages) {
-        console.log(`Processed ${i}/${pdf.numPages} pages`);
-      }
-    }
-    
-    // Clean up the text - remove PDF metadata markers and other unwanted patterns
-    fullText = fullText
-      .trim()
-      .replace(/\s+/g, ' ')         // Normalize whitespace
-      .replace(/(\w)-\s(\w)/g, '$1$2') // Remove hyphenation at line breaks
-      .replace(/&#172;/g, '¬')      // Fix common character issues
-      .replace(/&#163;/g, '£')
-      .replace(/&#128;/g, '€')
-      .replace(/\n{3,}/g, '\n\n')   // Normalize multiple newlines
-      .replace(/%PDF[\s\S]*?obj/g, '') // Remove PDF metadata markers
-      .replace(/<<\/[\s\S]*?>>/g, '') // Remove PDF object references
-      .replace(/\d+ \d+ R/g, '')    // Remove PDF references
-      .replace(/\[\s*\d+\s+\d+\s+\d+\s+\d+\s*\]/g, '') // Remove PDF coordinates
-      .replace(/obj<.*?>/g, '')     // Remove remaining obj markers
-      .replace(/endobj/g, '')       // Remove endobj markers
-      .replace(/stream[\s\S]*?endstream/g, '') // Remove stream content
-      .replace(/\d+\s+\d+\s+obj/g, ''); // Remove object definitions
-    
-    // If the text still contains too many PDF markers, try an alternative approach
-    if (fullText.includes('%PDF') || fullText.includes('obj<<') || fullText.length < 1000) {
-      console.log('Text still contains PDF markers, using alternative extraction method');
-      fullText = '';
-      
-      // Alternative extraction focusing only on readable text sections
-      for (let i = 1; i <= pdf.numPages; i++) {
+    console.time('Text extraction time');
+    for (let i = 1; i <= maxPages; i++) {
+      try {
+        console.log(`Processing page ${i} of ${maxPages}...`);
         const page = await pdf.getPage(i);
-        const textContent = await page.getTextContent();
+        const content = await page.getTextContent();
         
-        // Focus on text items that look like actual content
-        const pageText = textContent.items
-          .filter((item: any) => {
-            return 'str' in item && 
-                   typeof item.str === 'string' && 
-                   item.str.length > 1 &&
-                   !item.str.match(/%PDF|obj<|endobj|\d+ \d+ R/);
-          })
-          .map((item: any) => item.str)
-          .join(' ');
+        // Join text items, preserving newlines
+        const pageText = content.items
+          .map((item: any) => 'str' in item ? item.str : '')
+          .join(' ')
+          .replace(/\s+/g, ' ') // Clean up multiple spaces
+          .trim();
         
-        fullText += pageText + ' ';
+        fullText += pageText + '\n\n';
+      } catch (pageError) {
+        console.error(`Error extracting text from page ${i}:`, pageError);
       }
-      
-      fullText = fullText.trim().replace(/\s+/g, ' ');
     }
+    console.timeEnd('Text extraction time');
     
-    // Final validation - if we still have PDF markers, just extract plain alphabetic content
-    if (fullText.includes('%PDF') || fullText.length < 500) {
-      console.log('Falling back to basic text extraction');
-      // Extract only alphabetic content with spaces and basic punctuation
-      fullText = fullText.replace(/[^a-zA-Z0-9\s\.,;:!?'"()-]/g, ' ').replace(/\s+/g, ' ').trim();
+    // Clean up the text
+    fullText = fullText
+      .replace(/\n{3,}/g, '\n\n') // Normalize multiple newlines
+      .replace(/\s{2,}/g, ' ')    // Normalize multiple spaces
+      .trim();
+    
+    // Debug: Check extracted text quality
+    console.log(`Extracted text length: ${fullText.length} characters`);
+    console.log('First 200 characters:', fullText.substring(0, 200));
+    
+    // Check for PDF metadata in the extracted text
+    const containsPDFMetadata = fullText.includes('%PDF') || 
+                                fullText.includes('obj<') || 
+                                fullText.toLowerCase().includes('pdf-');
+    
+    if (containsPDFMetadata) {
+      console.warn('Warning: Extracted text contains PDF metadata/markers, may not be properly parsed');
     }
-    
-    console.log(`Extracted ${fullText.length} characters of cleaned text`);
     
     if (fullText.length < 500) {
       console.warn('Warning: Extracted text is very short, PDF might not contain extractable text');
@@ -112,212 +139,175 @@ const extractTextFromPDF = async (fileBuffer: Uint8Array): Promise<string> => {
   }
 };
 
-// Function to extract the first page of a PDF as an image
-const extractFirstPageAsImage = async (fileBuffer: Uint8Array): Promise<Uint8Array | null> => {
-  try {
-    console.log('Extracting first page as image');
-    // Initialize PDF.js
-    const loadingTask = pdfjs.getDocument({ data: fileBuffer });
-    const pdf = await loadingTask.promise;
-    
-    if (pdf.numPages === 0) {
-      console.warn('PDF has no pages');
-      return null;
-    }
-    
-    const page = await pdf.getPage(1);
-    const viewport = page.getViewport({ scale: 1.5 }); // Increase scale for better quality
-    
-    // Create a canvas to render the page
-    const canvas = new OffscreenCanvas(viewport.width, viewport.height);
-    const context = canvas.getContext('2d');
-    
-    if (!context) {
-      console.warn('Could not get canvas context');
-      return null;
-    }
-    
-    // Set white background
-    context.fillStyle = 'white';
-    context.fillRect(0, 0, viewport.width, viewport.height);
-    
-    // Render PDF page to canvas
-    await page.render({
-      canvasContext: context,
-      viewport: viewport
-    }).promise;
-    
-    // Convert canvas to PNG
-    const blob = await canvas.convertToBlob({ type: 'image/png' });
-    const arrayBuffer = await blob.arrayBuffer();
-    
-    console.log('First page extracted as image successfully');
-    return new Uint8Array(arrayBuffer);
-  } catch (error) {
-    console.error('Error extracting first page as image:', error);
-    return null;
-  }
-};
-
-// Function to chunk text by words with improved handling
-const chunkText = (text: string, chunkSize = 500): string[] => {
-  console.log(`Chunking text into segments of ~${chunkSize} words`);
-  // Split by sentence boundaries when possible
-  const sentences = text.replace(/([.!?])\s+/g, '$1|').split('|');
-  const chunks: string[] = [];
-  let currentChunk = '';
-  
-  for (const sentence of sentences) {
-    if (!sentence.trim()) continue;
-    
-    // If adding this sentence would exceed chunk size, save current chunk and start new one
-    if (currentChunk.split(/\s+/).length + sentence.split(/\s+/).length > chunkSize && currentChunk) {
-      chunks.push(currentChunk.trim());
-      currentChunk = '';
-    }
-    
-    currentChunk += (currentChunk ? ' ' : '') + sentence;
-    
-    // If current chunk is getting too large, save it even without a sentence boundary
-    if (currentChunk.split(/\s+/).length >= chunkSize) {
-      chunks.push(currentChunk.trim());
-      currentChunk = '';
-    }
+// Generate a summary of the book
+const generateSummary = async (text: string): Promise<string> => {
+  // For now, just take the first 1000 characters as a summary
+  // This could be replaced with a more sophisticated algorithm or AI model
+  if (!text || text.length === 0) {
+    return 'No text content available for summarization.';
   }
   
-  // Add the last chunk if there's anything left
-  if (currentChunk.trim()) {
-    chunks.push(currentChunk.trim());
+  // Clean the text to ensure we're not returning PDF metadata
+  const cleanText = text
+    .replace(/%PDF[^]*?obj/g, '') // Remove PDF header and objects
+    .replace(/<<\/[^>]*>>/g, '')  // Remove PDF dictionary objects
+    .trim();
+  
+  if (cleanText.length < 100) {
+    return 'This document appears to contain limited extractable text content.';
   }
   
-  console.log(`Created ${chunks.length} chunks`);
-  return chunks;
-};
-
-// Generate a human-readable summary for a chunk of text
-const generateSummary = (text: string, maxWords = 50): string => {
-  // Find the first few complete sentences if possible
-  const sentencePattern = /^.+?[.!?](?:\s|$)/g;
-  const sentences = text.match(sentencePattern) || [];
-  
+  // Get the first paragraph that has substantive content
+  const paragraphs = cleanText.split('\n\n');
   let summary = '';
-  let wordCount = 0;
   
-  for (const sentence of sentences) {
-    const sentenceWordCount = sentence.split(/\s+/).length;
-    if (wordCount + sentenceWordCount <= maxWords) {
-      summary += sentence;
-      wordCount += sentenceWordCount;
-    } else {
+  for (const paragraph of paragraphs) {
+    if (paragraph.length > 150 && !paragraph.includes('%PDF') && !paragraph.includes('obj<')) {
+      summary = paragraph;
       break;
     }
   }
   
-  // If we couldn't get enough complete sentences, just use the first maxWords
-  if (wordCount < maxWords / 2) {
-    const words = text.split(/\s+/);
-    summary = words.slice(0, maxWords).join(' ') + (words.length > maxWords ? '...' : '');
+  // If we didn't find a good paragraph, just take the beginning
+  if (!summary) {
+    summary = cleanText.substring(0, 1000);
   }
   
-  return summary.trim();
+  // Truncate and add ellipsis
+  if (summary.length > 1000) {
+    summary = summary.substring(0, 997) + '...';
+  }
+  
+  return summary;
 };
 
-serve(async (req) => {
+// Handler for the function
+Deno.serve(async (req) => {
+  console.log('--- Book Upload Request Started ---');
+  console.log('Request method:', req.method);
+  
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+    console.log('Handling CORS preflight request');
+    return new Response(null, {
+      status: 204,
+      headers: corsHeaders
+    });
   }
 
-  try {
-    // Get the authorization header from the request
-    const authHeader = req.headers.get('Authorization');
-    
-    if (!authHeader) {
-      return new Response(
-        JSON.stringify({ success: false, error: 'No authorization header' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    // Create a Supabase client with the user's JWT
-    const supabaseClient = createClient(
-      SUPABASE_URL,
-      SUPABASE_ANON_KEY,
-      {
-        global: {
-          headers: { Authorization: authHeader },
-        },
+  // Create a Supabase client with the service role key
+  const supabaseClient = createClient(
+    supabaseUrl!,
+    serviceRoleKey!,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
       }
-    );
+    }
+  );
 
-    // Verify the user is authenticated
-    const { data: { user }, error: authError } = await supabaseClient.auth.getUser();
+  try {
+    // Get the user from the request
+    console.log('Authenticating user...');
+    const authHeader = req.headers.get('Authorization') || '';
     
-    if (authError || !user) {
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      console.error('Invalid authorization header:', authHeader);
       return new Response(
-        JSON.stringify({ success: false, error: 'Unauthorized' }),
+        JSON.stringify({ success: false, error: 'Invalid authorization header' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
-
-    // Check if this is a multipart form data request
-    const contentType = req.headers.get('content-type') || '';
     
-    if (!contentType.includes('multipart/form-data')) {
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: userError } = await supabaseClient.auth.getUser(token);
+
+    if (userError || !user) {
+      console.error('Auth error:', userError);
       return new Response(
-        JSON.stringify({ success: false, error: 'Expected multipart/form-data' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ success: false, error: userError?.message || 'Unauthorized' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+    
+    console.log('User authenticated:', user.id);
 
-    // Parse the form data
+    // Ensure book storage bucket exists
+    console.log('Checking if books bucket exists...');
+    const { data: buckets } = await supabaseClient.storage.listBuckets();
+    
+    if (!buckets?.find(b => b.name === 'books')) {
+      console.log('Creating books bucket...');
+      await supabaseClient.storage.createBucket('books', {
+        public: false,
+        fileSizeLimit: 52428800 // 50MB
+      });
+    }
+
+    // Parse form data to get file, title, and author
+    console.log('Parsing form data...');
     const formData = await req.formData();
-    const file = formData.get('file');
-    const title = formData.get('title') as string || 'Untitled';
-    const author = formData.get('author') as string || 'Unknown';
-    const category = formData.get('category') as string || 'Uncategorized';
     
-    // Validate category
-    const validCategories = ["Fiction", "Non-Fiction", "Philosophy", "Science", "History"];
-    if (!validCategories.includes(category)) {
+    const file = formData.get('file') as File;
+    const title = formData.get('title') as string; 
+    const author = formData.get('author') as string;
+    const category = formData.get('category') as string;
+
+    // Log received data for debugging
+    console.log({
+      fileReceived: !!file,
+      fileType: file?.type,
+      fileName: file?.name,
+      fileSize: file?.size,
+      title,
+      author,
+      category
+    });
+
+    // Validate required fields
+    if (!file || !title || !author || !category) {
+      console.error('Missing required fields:', { file: !!file, title, author, category });
       return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: `Invalid category. Must be one of: ${validCategories.join(', ')}` 
-        }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-    
-    if (!file || !(file instanceof File)) {
-      return new Response(
-        JSON.stringify({ success: false, error: 'No file found in request' }),
+        JSON.stringify({ success: false, error: 'Missing required fields' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Validate file type (PDF only) - FIX: Use more reliable method to check if file is PDF
-    const isPDF = file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf';
+    // Validate file type (PDF only)
+    const fileName = file.name || '';
+    const fileType = file.type || '';
+    
+    console.log(`File details: name=${fileName}, type=${fileType}, size=${file.size}`);
+    
+    const isPDF = fileName.toLowerCase().endsWith('.pdf') || fileType === 'application/pdf';
     if (!isPDF) {
+      console.error('Invalid file type:', fileType);
       return new Response(
         JSON.stringify({ success: false, error: 'Only PDF files are allowed' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    console.log(`Processing file: ${file.name} (${file.size} bytes), type: ${file.type}`);
-
     // Create a unique filename to prevent overwriting
     const uniqueFilename = `${user.id}-${Date.now()}-${file.name}`;
     const filePath = `${user.id}/${uniqueFilename}`;
     
     // Convert File to ArrayBuffer for upload and processing
+    console.log('Converting file to buffer...');
     const arrayBuffer = await file.arrayBuffer();
     const fileBuffer = new Uint8Array(arrayBuffer);
 
+    // Debug: Check first few bytes of the file
+    const firstBytes = Array.from(fileBuffer.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' ');
+    console.log('First 16 bytes of file:', firstBytes);
+
     // Check if file starts with %PDF (basic PDF validation)
     const headerCheck = new TextDecoder().decode(fileBuffer.slice(0, 8));
+    console.log('File header:', headerCheck);
+    
     if (!headerCheck.startsWith('%PDF')) {
+      console.error('Invalid PDF header:', headerCheck);
       return new Response(
         JSON.stringify({ success: false, error: 'Invalid PDF file format' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -334,134 +324,115 @@ serve(async (req) => {
       });
 
     if (uploadError) {
-      console.error('Error uploading file:', uploadError);
+      console.error('Storage upload error:', uploadError);
       return new Response(
-        JSON.stringify({ success: false, error: `Error uploading file: ${uploadError.message}` }),
+        JSON.stringify({ success: false, error: uploadError.message }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Generate URL for the uploaded file
+    console.log('File uploaded successfully:', uploadData.path);
+
+    // Create a signed URL for the file
     const { data: urlData } = await supabaseClient.storage
       .from('books')
       .createSignedUrl(filePath, 60 * 60 * 24 * 365); // 1 year expiry
 
-    // Extract the first page as an image and upload as book icon
-    console.log('Extracting book cover...');
-    const iconBuffer = await extractFirstPageAsImage(fileBuffer);
-    let iconUrl = null;
-    
-    if (iconBuffer) {
-      const iconFilename = `${user.id}-${Date.now()}-icon-${file.name.replace('.pdf', '.png')}`;
-      const iconPath = `${user.id}/${iconFilename}`;
-      
-      const { data: iconUploadData, error: iconUploadError } = await supabaseClient.storage
-        .from('books')
-        .upload(iconPath, iconBuffer, {
-          contentType: 'image/png',
-          upsert: true,
-        });
-        
-      if (!iconUploadError) {
-        const { data: iconUrlData } = await supabaseClient.storage
-          .from('books')
-          .createSignedUrl(iconPath, 60 * 60 * 24 * 365); // 1 year expiry
-          
-        if (iconUrlData) {
-          iconUrl = iconUrlData.signedUrl;
-          console.log('Book cover uploaded successfully');
-        }
-      } else {
-        console.warn('Failed to upload book cover:', iconUploadError);
-      }
-    } else {
-      console.warn('Could not extract book cover');
-    }
-    
-    // Extract text from PDF with improved method
-    console.log('Extracting text from PDF...');
-    const extractedText = await extractTextFromPDF(fileBuffer);
-    
-    if (!extractedText || extractedText.length < 100) {
-      console.error('Failed to extract meaningful text from PDF');
+    if (!urlData?.signedUrl) {
+      console.error('Failed to create signed URL');
       return new Response(
-        JSON.stringify({ success: false, error: 'Could not extract readable text from the PDF' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-    
-    // Generate chunks with improved method
-    console.log('Generating text chunks...');
-    const textChunks = chunkText(extractedText);
-    
-    // Generate a summary for the whole book
-    console.log('Generating book summary...');
-    const wholeSummary = generateSummary(extractedText, 100);
-    
-    console.log('Book summary:', wholeSummary);
-    
-    // Insert book data into the database
-    console.log('Inserting book data into database...');
-    const { data: bookData, error: bookError } = await supabaseClient
-      .from('books')
-      .insert({
-        user_id: user.id,
-        title,
-        author,
-        category,
-        file_url: urlData?.signedUrl || '',
-        icon_url: iconUrl,
-        summary: wholeSummary,
-      })
-      .select()
-      .single();
-      
-    if (bookError) {
-      console.error('Error inserting book:', bookError);
-      return new Response(
-        JSON.stringify({ success: false, error: `Error saving book metadata: ${bookError.message}` }),
+        JSON.stringify({ success: false, error: 'Failed to create file URL' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    // Extract text from the PDF
+    console.log('Extracting text from PDF...');
+    const bookText = await extractPdfText(fileBuffer);
     
-    // Insert text chunks with summaries
-    console.log('Inserting text chunks...');
-    const chunkInserts = textChunks.map((chunk, index) => {
-      const chunkSummary = generateSummary(chunk, 50);
-      return {
-        book_id: bookData.id,
-        chunk_index: index,
-        title: `${title} - Part ${index + 1}`,
-        text: chunk,
-        summary: chunkSummary
-      };
-    });
-    
-    if (chunkInserts.length > 0) {
-      const { error: chunksError } = await supabaseClient
-        .from('book_chunks')
-        .insert(chunkInserts);
-        
-      if (chunksError) {
-        console.error('Error inserting chunks:', chunksError);
-        // We don't fail the whole operation if chunks fail, but log it
-      }
+    if (!bookText || bookText.length < 100) {
+      console.warn('Failed to extract sufficient text from PDF');
     }
 
+    // Generate a summary of the book
+    console.log('Generating book summary...');
+    const summary = await generateSummary(bookText);
+    console.log('Summary generated:', summary.substring(0, 100) + '...');
+
+    // Split the text into chunks for vector storage
+    console.log('Chunking text...');
+    const chunks = chunkText(bookText);
+    console.log(`Created ${chunks.length} chunks`);
+
+    // Create a book entry in the database
+    console.log('Creating book record...');
+    const bookId = uuidv4();
+    const { error: bookError } = await supabaseClient
+      .from('books')
+      .insert({
+        id: bookId,
+        user_id: user.id,
+        title: title,
+        author: author,
+        category: category,
+        file_url: urlData.signedUrl,
+        summary: summary
+      });
+
+    if (bookError) {
+      console.error('Book creation error:', bookError);
+      return new Response(
+        JSON.stringify({ success: false, error: bookError.message }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Create book chunks for vector search
+    console.log('Storing book chunks...');
+    const chunkPromises = chunks.map((chunk, i) => {
+      return supabaseClient
+        .from('book_chunks')
+        .insert({
+          book_id: bookId,
+          chunk_index: i,
+          title: title,
+          text: chunk,
+          summary: i === 0 ? summary : undefined
+        });
+    });
+    
+    const chunkResults = await Promise.allSettled(chunkPromises);
+    const failedChunks = chunkResults.filter(r => r.status === 'rejected');
+    
+    if (failedChunks.length > 0) {
+      console.warn(`${failedChunks.length} chunks failed to insert`);
+    }
+
+    console.log('Book processing complete!');
+    console.log('--- Book Upload Request Completed Successfully ---');
+    
+    // Return success response
     return new Response(
       JSON.stringify({
         success: true,
-        message: `Book '${title}' by ${author} uploaded successfully`,
-        bookId: bookData.id,
-        fileUrl: urlData?.signedUrl || null,
+        message: 'Book uploaded and processed successfully',
+        bookId,
+        fileUrl: urlData.signedUrl
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
+
   } catch (error) {
-    console.error('Error processing upload:', error);
+    console.error('Error processing book upload:', error);
     return new Response(
-      JSON.stringify({ success: false, error: `Server error: ${error.message}` }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      JSON.stringify({ 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Unknown error processing book upload' 
+      }),
+      { 
+        status: 500, 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+      }
     );
   }
 });
