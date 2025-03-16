@@ -1,4 +1,3 @@
-
 // Follow the steps below to run locally:
 // 1. deno install -Arf -n supabase https://deno.land/x/supabase/cli/bin/supabase.ts
 // 2. supabase functions serve chat-response --no-verify-jwt
@@ -194,6 +193,17 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Check if bookId is provided, return error if not
+    if (!bookId) {
+      return new Response(
+        JSON.stringify({ error: 'No book selected' }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
     // Format context from chunks
     let context = '';
     let bookTitle = null;
@@ -267,6 +277,13 @@ Deno.serve(async (req) => {
           }));
         } else {
           console.log('No chunks found for book');
+          return new Response(
+            JSON.stringify({ error: `No content found for the selected book. Please try uploading it again.` }),
+            {
+              status: 404,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            }
+          );
         }
       } catch (err) {
         console.error('Error in bookId processing:', err);
@@ -279,39 +296,7 @@ Deno.serve(async (req) => {
         );
       }
     }
-    // If no bookId and no chunks provided, fetch summaries from all books for general context
-    else if (!chunks.length && !bookId) {
-      console.log('Fetching summaries from all books for general chat');
-      
-      try {
-        // Get all books with summaries
-        const { data: booksData, error: booksError } = await supabaseClient
-          .from('books')
-          .select('id, title, author, summary')
-          .order('created_at', { ascending: false })
-          .limit(10); // Limit to recent books to avoid token overflow
-          
-        if (booksError) {
-          console.error('Error fetching books:', booksError);
-        } else if (booksData && booksData.length > 0) {
-          console.log(`Found ${booksData.length} books with summaries`);
-          
-          for (const book of booksData) {
-            chunks.push({
-              title: book.title,
-              author: book.author,
-              text: book.summary || '',
-              summary: book.summary || ''
-            });
-          }
-        } else {
-          console.log('No books with summaries found');
-        }
-      } catch (err) {
-        console.error('Error in general chat processing:', err);
-        // Continue with empty chunks rather than failing
-      }
-    }
+    // We've removed the block that fetches all books for general context
 
     console.log(`Processing ${chunks.length} chunks for context`);
     const book_citations: Record<string, string> = {};
@@ -335,16 +320,22 @@ Deno.serve(async (req) => {
       context = truncateContext(chunks, MAX_TOKENS);
     } else {
       console.log('No chunks available for context');
-      context = "No book context available. I'll try to answer based on general knowledge.";
+      return new Response(
+        JSON.stringify({ error: `No content available for the selected book.` }),
+        {
+          status: 404,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
     }
 
-    // Create prompt for Grok
-    const prompt = `Answer the query: '${query}' using this context: 
+    // Create prompt for Grok - restricting to book's content only
+    const prompt = `Answer the query: '${query}' using ONLY the information provided in the following context: 
     
 ${context}
 
-Always cite the book and author when referencing information from the texts. 
-If the answer cannot be found in the provided context, indicate that clearly.
+Answer ONLY based on the information in the context. If the answer cannot be found in the provided context, say "I don't have enough information about that in this book."
+Always cite the book and author when referencing information from the texts.
 Provide a thoughtful, well-reasoned response with quotations from the book where appropriate.`;
 
     console.log(`Prompt length: ${prompt.length} characters (approximately ${estimateTokenCount(prompt)} tokens)`);

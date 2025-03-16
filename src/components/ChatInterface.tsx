@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import BookSelector from './BookSelector';
 import ChatWelcome from './chat/ChatWelcome';
@@ -8,7 +9,7 @@ import useChat from '@/hooks/useChat';
 import { Book } from '@/types';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
-import { Upload, Trash2 } from 'lucide-react';
+import { Upload, Trash2, BookX } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { fetchUserBooks, deleteBook } from '@/services/api';
 import { useToast } from "@/components/ui/use-toast";
@@ -38,8 +39,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedBookId }) => {
   const {
     messages,
     isLoading,
-    chatMode,
-    setChatMode,
     handleSubmit,
     error
   } = useChat(selectedBook?.title || null, selectedBookId);
@@ -58,11 +57,26 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedBookId }) => {
     }
   };
 
+  const handleRemoveBookFromChat = () => {
+    navigate('/chat');
+    setSelectedBook(null);
+    
+    toast({
+      title: "Book removed from chat",
+      description: "You can now select another book to chat with.",
+    });
+  };
+
   const handleBookSelection = (book: Book) => {
     setSelectedBook(book);
     setShowBookSelector(false);
     
     navigate(`/chat/${book.id}`);
+    
+    toast({
+      title: "Book selected for chat",
+      description: `You can now chat with ${book.title}`,
+    });
   };
 
   const handleConfirmDelete = async () => {
@@ -166,17 +180,19 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedBookId }) => {
       {!selectedBookId && messages.length <= 1 ? (
         <ChatWelcome
           onSelectBookClick={handleSelectBookClick}
-          onChatModeChange={setChatMode}
-          chatMode={chatMode}
           onExampleQuestionClick={handleSubmit}
           onUploadBookClick={handleUploadBookClick}
         />
       ) : (
         <>
           <div className="flex justify-between items-center mb-4">
-            {selectedBook && (
+            {selectedBook ? (
               <div className="text-sm font-medium text-muted-foreground">
                 Chatting with: {selectedBook.title} by {selectedBook.author}
+              </div>
+            ) : (
+              <div className="text-sm font-medium text-muted-foreground">
+                Please select a book to start chatting
               </div>
             )}
             <div className="flex gap-2">
@@ -188,17 +204,30 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedBookId }) => {
               >
                 Select Book
               </Button>
+              
               {selectedBook && (
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className="flex items-center gap-2 text-destructive hover:bg-destructive/10"
-                  onClick={handleDeleteBookClick}
-                >
-                  <Trash2 className="h-4 w-4" />
-                  Delete Book
-                </Button>
+                <>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="flex items-center gap-2 text-amber-500 hover:bg-amber-500/10"
+                    onClick={handleRemoveBookFromChat}
+                  >
+                    <BookX className="h-4 w-4" />
+                    Remove Book
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="flex items-center gap-2 text-destructive hover:bg-destructive/10"
+                    onClick={handleDeleteBookClick}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Delete Book
+                  </Button>
+                </>
               )}
+              
               <Button 
                 variant="outline" 
                 size="sm" 

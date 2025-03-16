@@ -1,25 +1,19 @@
 
 import { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { ChatMessage, ChatMode } from '../types';
+import { ChatMessage } from '../types';
 import { sendChatRequest, fetchBookChunks } from '@/services/api';
-
-interface UseChatProps {
-  initialMessages?: ChatMessage[];
-  initialMode?: ChatMode;
-}
 
 const useChat = (selectedBook: string | null = null, selectedBookId: string | null = null) => {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: uuidv4(),
-      content: "Hello! I'm BookBodh, your AI assistant. How can I help you today?",
+      content: "Hello! I'm BookBodh, your AI assistant. Please select a book to start chatting.",
       type: 'bot',
       timestamp: new Date(),
     },
   ]);
   const [isLoading, setIsLoading] = useState(false);
-  const [chatMode, setChatMode] = useState<ChatMode>('general');
   const [bookChunks, setBookChunks] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,29 +28,59 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
           
           if (!chunks || chunks.length === 0) {
             console.warn('No chunks found for book ID:', selectedBookId);
+            setError('No content found for this book. Please try uploading it again.');
           } else {
             console.log(`Loaded ${chunks.length} chunks for book ID: ${selectedBookId}`);
+            
+            // When a new book is selected, add a welcome message for that book
+            if (messages.length <= 1 || messages[messages.length - 1].type === 'user') {
+              setMessages(prev => [
+                ...prev.filter(msg => !msg.isBookWelcome), // Remove any previous book welcome messages
+                {
+                  id: uuidv4(),
+                  content: `I'm ready to help you with "${selectedBook}". What would you like to know about this book?`,
+                  type: 'bot',
+                  timestamp: new Date(),
+                  isBookWelcome: true
+                }
+              ]);
+            }
           }
           
           setBookChunks(chunks || []);
-          // When chunks are loaded, set mode to specific-book
-          setChatMode('specific-book');
         } catch (error) {
           console.error('Error loading book chunks:', error);
           setError('Failed to load book data. Please try again later.');
         }
       } else {
-        // Reset to general mode if no book ID
-        setChatMode('general');
+        // Reset when no book ID is selected
         setBookChunks([]);
+        
+        // Reset the welcome message if no book is selected
+        if (messages.length > 1) {
+          setMessages([
+            {
+              id: uuidv4(),
+              content: "Hello! I'm BookBodh, your AI assistant. Please select a book to start chatting.",
+              type: 'bot',
+              timestamp: new Date(),
+            }
+          ]);
+        }
       }
     };
 
     loadBookChunks();
-  }, [selectedBookId]);
+  }, [selectedBookId, selectedBook]);
 
   const handleSubmit = async (query: string) => {
     if (!query.trim() || isLoading) return;
+    
+    // Check if a book is selected
+    if (!selectedBookId) {
+      setError('Please select a book before chatting.');
+      return;
+    }
 
     // Reset any previous errors
     setError(null);
@@ -85,12 +109,12 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
     setIsLoading(true);
 
     try {
-      // Prepare the request payload with book chunks if in specific-book mode
+      // Prepare the request payload with book chunks if book is selected
       const requestPayload = {
         query,
         book: selectedBook,
         bookId: selectedBookId,
-        chunks: chatMode === 'specific-book' && bookChunks.length > 0 
+        chunks: bookChunks.length > 0 
           ? bookChunks.map(chunk => ({
               title: chunk.title || selectedBook || 'Unknown',
               author: chunk.author || 'Unknown',
@@ -161,8 +185,6 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
   return {
     messages,
     isLoading,
-    chatMode,
-    setChatMode,
     handleSubmit,
     error
   };

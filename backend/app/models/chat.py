@@ -5,6 +5,7 @@ from typing import Optional
 class ChatRequest(BaseModel):
     query: str
     book: Optional[str] = None
+    bookId: Optional[str] = None
 
 class ChatResponse(BaseModel):
     response: str

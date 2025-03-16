@@ -14,6 +14,7 @@ export interface ChatMessage {
   timestamp: Date;
   citations?: Citation[];
   isLoading?: boolean;
+  isBookWelcome?: boolean;
 }
 
 export interface Book {

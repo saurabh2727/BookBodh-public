@@ -18,13 +18,21 @@ async def chat(request: ChatRequest):
         ChatResponse with AI-generated answer and citation information
     """
     try:
+        # Validate the request
+        if not request.book:
+            return ChatResponse(
+                response="Please select a book to start chatting.",
+                book=None,
+                author=None
+            )
+            
         # Retrieve relevant chunks based on query and optional book filter
         chunks = retrieve_chunks(request.query, request.book)
         
         if not chunks:
             # If no relevant chunks found, return a helpful message
             return ChatResponse(
-                response="I couldn't find any relevant information in our book database. Please try a different question or book selection.",
+                response="I couldn't find any relevant information in this book. Please try a different question or book selection.",
                 book=None,
                 author=None
             )

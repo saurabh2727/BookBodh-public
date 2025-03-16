@@ -2,100 +2,112 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { SendHorizontal } from 'lucide-react';
-import { sampleUserQueries } from '@/utils/mockData';
-import { Textarea } from '@/components/ui/textarea';
+import { Send, Sparkles } from 'lucide-react';
+import { 
+  CommandDialog, 
+  CommandInput,
+  CommandList,
+  CommandEmpty,
+  CommandGroup,
+  CommandItem,
+} from '@/components/ui/command';
 
 interface QueryInputProps {
   onSubmit: (query: string) => void;
-  isLoading: boolean;
+  isLoading?: boolean;
   suggestions?: string[];
+  disabled?: boolean;
+  placeholderText?: string;
 }
 
 const QueryInput: React.FC<QueryInputProps> = ({ 
   onSubmit, 
-  isLoading, 
-  suggestions = [] 
+  isLoading = false,
+  suggestions = [],
+  disabled = false,
+  placeholderText = "Ask a question..."
 }) => {
-  const [query, setQuery] = useState<string>('');
-  const [activeSuggestions, setActiveSuggestions] = useState<string[]>([]);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    // Use provided suggestions or fall back to sample queries
-    if (suggestions.length > 0) {
-      setActiveSuggestions(suggestions);
-    } else if (!activeSuggestions.length) {
-      setActiveSuggestions(sampleUserQueries);
-    }
-  }, [suggestions, activeSuggestions.length]);
+    const down = (e: KeyboardEvent) => {
+      if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        setOpen((open) => !open);
+      }
+    };
+
+    document.addEventListener('keydown', down);
+    return () => document.removeEventListener('keydown', down);
+  }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!query.trim() || isLoading || disabled) return;
     
-    if (query.trim() && !isLoading) {
-      onSubmit(query);
-      setQuery('');
-      
-      // Focus the input after submission
-      setTimeout(() => {
-        textareaRef.current?.focus();
-      }, 100);
-    }
-  };
-
-  const handleSuggestionClick = (suggestion: string) => {
-    onSubmit(suggestion);
+    onSubmit(query.trim());
     setQuery('');
   };
 
+  const handleSuggestionSelect = (suggestion: string) => {
+    if (disabled) return;
+    
+    setOpen(false);
+    onSubmit(suggestion);
+  };
+
   return (
-    <div className="w-full max-w-2xl mx-auto">
-      {!isLoading && activeSuggestions.length > 0 && (
-        <div className="mb-4 flex flex-wrap gap-2 animate-fade-in">
-          {activeSuggestions.map((suggestion, index) => (
-            <Button
-              key={index}
-              variant="outline"
-              size="sm"
-              className="text-xs bg-secondary/80 text-secondary-foreground hover:bg-secondary/90 transition-all border-0 shadow-sm"
-              onClick={() => handleSuggestionClick(suggestion)}
-            >
-              {suggestion}
-            </Button>
-          ))}
-        </div>
-      )}
-      
-      <form onSubmit={handleSubmit} className="relative animate-fade-in">
-        <div className="paper-texture rounded-lg overflow-hidden border border-border/80 shadow-md">
-          <Textarea
-            ref={textareaRef}
-            placeholder="Ask about an ethical dilemma..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="min-h-[80px] resize-none py-4 px-5 bg-paper focus-visible:ring-primary/30 text-base md:text-sm"
-            disabled={isLoading}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleSubmit(e);
-              }
-            }}
-          />
-        </div>
-        <Button
-          type="submit"
-          size="icon"
-          className={`absolute right-3 bottom-3 rounded-full w-10 h-10 ${
-            !query.trim() || isLoading ? 'opacity-50 cursor-not-allowed' : 'opacity-100'
-          }`}
-          disabled={!query.trim() || isLoading}
-        >
-          <SendHorizontal className="h-5 w-5" />
-        </Button>
-      </form>
-    </div>
+    <form onSubmit={handleSubmit} className="flex gap-2">
+      <div className="relative flex-1">
+        <Input
+          ref={inputRef}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={placeholderText}
+          className="w-full pr-10"
+          disabled={isLoading || disabled}
+        />
+        {suggestions.length > 0 && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="absolute right-0 top-0 h-full px-3 py-2 text-muted-foreground"
+            onClick={() => setOpen(true)}
+            disabled={isLoading || disabled}
+          >
+            <Sparkles className="h-4 w-4" />
+          </Button>
+        )}
+      </div>
+      <Button 
+        type="submit" 
+        size="icon" 
+        disabled={!query.trim() || isLoading || disabled}
+        className={isLoading ? 'opacity-70' : ''}
+      >
+        <Send className="h-4 w-4" />
+      </Button>
+
+      <CommandDialog open={open} onOpenChange={setOpen}>
+        <CommandInput placeholder="Search suggestions..." />
+        <CommandList>
+          <CommandEmpty>No suggestions found.</CommandEmpty>
+          <CommandGroup heading="Suggestions">
+            {suggestions.map((suggestion, index) => (
+              <CommandItem
+                key={index}
+                onSelect={() => handleSuggestionSelect(suggestion)}
+              >
+                {suggestion}
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        </CommandList>
+      </CommandDialog>
+    </form>
   );
 };
 

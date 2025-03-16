@@ -30,10 +30,10 @@ const ChatControls: React.FC<ChatControlsProps> = ({
       ]);
     } else {
       setDynamicSuggestions([
-        "What books do I have?",
-        "Summarize all my books",
-        "Which book should I read first?",
-        "Compare the books in my library"
+        "Please select a book to start chatting",
+        "You need to select a book first",
+        "Upload a book or select one from your library",
+        "Chat requires a book selection"
       ]);
     }
   }, [selectedBookId, selectedBookTitle]);
@@ -44,6 +44,8 @@ const ChatControls: React.FC<ChatControlsProps> = ({
         onSubmit={onSubmit} 
         isLoading={isLoading} 
         suggestions={dynamicSuggestions}
+        disabled={!selectedBookId}
+        placeholderText={selectedBookId ? "Ask a question about this book..." : "Select a book to start chatting..."}
       />
     </div>
   );
