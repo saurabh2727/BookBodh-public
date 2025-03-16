@@ -5,7 +5,7 @@ import os
 import shutil
 import uuid
 from typing import List, Dict
-import PyPDF2
+import pdfplumber
 from io import BytesIO
 
 from app.config.settings import settings
@@ -22,6 +22,56 @@ def get_book_db():
 
 def get_embedding_store(book_db: BookDatabase = Depends(get_book_db)):
     return EmbeddingStore(book_db)
+
+def extract_text_from_pdf(file_path: str) -> str:
+    """
+    Extract text from a PDF file using pdfplumber
+    
+    Args:
+        file_path: Path to the PDF file
+        
+    Returns:
+        Extracted text string
+        
+    Raises:
+        ValueError: If text extraction fails
+    """
+    print(f"Extracting text from PDF: {file_path}")
+    extracted_text = ""
+    pages_with_content = 0
+    total_pages = 0
+    
+    try:
+        with pdfplumber.open(file_path) as pdf:
+            total_pages = len(pdf.pages)
+            print(f"PDF has {total_pages} pages")
+            
+            if total_pages == 0:
+                raise ValueError("PDF appears to be empty (0 pages)")
+            
+            for page_num, page in enumerate(pdf.pages):
+                try:
+                    page_text = page.extract_text() or ""
+                    if page_text.strip():
+                        pages_with_content += 1
+                    else:
+                        print(f"Warning: Page {page_num + 1} yielded no text")
+                    
+                    extracted_text += page_text + " "
+                except Exception as e:
+                    print(f"Error extracting text from page {page_num + 1}: {str(e)}")
+    except Exception as e:
+        raise ValueError(f"Failed to extract text from PDF: {str(e)}")
+    
+    # Clean and validate the extracted text
+    extracted_text = extracted_text.strip()
+    
+    if not extracted_text:
+        print(f"No text extracted from {total_pages} pages. Pages with content: {pages_with_content}")
+        raise ValueError(f"Could not extract any text from the PDF. Pages with content: {pages_with_content}/{total_pages}")
+    
+    print(f"Successfully extracted {len(extracted_text)} characters from {pages_with_content}/{total_pages} pages")
+    return extracted_text
 
 @router.post("/upload-book")
 async def upload_book(
@@ -45,22 +95,20 @@ async def upload_book(
         # Save uploaded file
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-            
-        # Extract text from PDF
-        text = ""
-        with open(file_path, "rb") as pdf_file:
-            pdf_reader = PyPDF2.PdfReader(pdf_file)
-            for page_num in range(len(pdf_reader.pages)):
-                page = pdf_reader.pages[page_num]
-                text += page.extract_text() + " "
         
-        if not text.strip():
-            raise HTTPException(status_code=400, detail="Could not extract text from PDF")
+        print(f"File saved to {file_path}, now extracting text")
+        
+        # Extract text from PDF using improved function
+        try:
+            text = extract_text_from_pdf(file_path)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
             
         # Get book title from filename (remove extension)
         book_title = file.filename.rsplit('.', 1)[0]
         
-        # Process book text (add to database and update embeddings) in background
+        # Process book text in background
+        print(f"Starting background processing for book '{book_title}'")
         background_tasks.add_task(
             process_book,
             book_db,
@@ -83,4 +131,5 @@ async def upload_book(
         # Cleanup on error
         if os.path.exists(file_path):
             os.remove(file_path)
+        print(f"Error processing book: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error processing book: {str(e)}")

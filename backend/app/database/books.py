@@ -2,6 +2,8 @@
 from typing import Dict, List, Optional
 import re
 import uuid
+import os
+import json
 
 class BookDatabase:
     def __init__(self):
@@ -70,6 +72,43 @@ Aurelius consistently returns to the importance of accepting what cannot be chan
         # Process books into chunks
         self.chunks = []
         self._process_books()
+        
+        # Try to load uploaded books data from a JSON file if it exists
+        self._load_external_books()
+    
+    def _load_external_books(self):
+        """Attempt to load book data from a JSON file (for integration with Supabase)"""
+        try:
+            cache_file = os.path.join(os.path.dirname(__file__), "books_cache.json")
+            if os.path.exists(cache_file):
+                print(f"Loading books cache from {cache_file}")
+                with open(cache_file, 'r') as f:
+                    external_data = json.load(f)
+                    
+                    # Add books to the in-memory database
+                    if "books" in external_data:
+                        for book_id, book_data in external_data["books"].items():
+                            if book_data.get("title") not in self.books:
+                                self.books[book_data["title"]] = {
+                                    "id": book_id,
+                                    "author": book_data.get("author", "Unknown"),
+                                    "content": book_data.get("content", "")
+                                }
+                                print(f"Loaded book: {book_data['title']} with ID {book_id}")
+                    
+                    # Add chunks to the in-memory database
+                    if "chunks" in external_data:
+                        for chunk in external_data["chunks"]:
+                            # Skip if this chunk already exists
+                            if any(c.get("id") == chunk.get("id") for c in self.chunks):
+                                continue
+                            
+                            self.chunks.append(chunk)
+                            print(f"Loaded chunk #{chunk.get('id')} for book ID {chunk.get('book_id')}")
+                
+                print(f"Loaded {len(self.books)} books and {len(self.chunks)} chunks from external data")
+        except Exception as e:
+            print(f"Error loading external books: {e}")
     
     def _process_books(self, chunk_size: int = 300):
         """
@@ -83,6 +122,7 @@ Aurelius consistently returns to the importance of accepting what cannot be chan
         for title, book_data in self.books.items():
             author = book_data["author"]
             content = book_data["content"]
+            book_id = book_data.get("id", str(uuid.uuid4()))
             
             # Clean text
             content = re.sub(r'\s+', ' ', content).strip()
@@ -97,6 +137,7 @@ Aurelius consistently returns to the importance of accepting what cannot be chan
                     chunk_text = ' '.join(chunk_words)
                     self.chunks.append({
                         "id": chunk_id,
+                        "book_id": book_id,
                         "title": title,
                         "author": author,
                         "text": chunk_text
@@ -156,7 +197,32 @@ Aurelius consistently returns to the importance of accepting what cannot be chan
                 })
                 chunk_id += 1
         
+        # Attempt to save books to cache
+        self._save_external_books()
+        
         return book_id
+    
+    def _save_external_books(self):
+        """Save current books and chunks to a cache file for persistence"""
+        try:
+            cache_file = os.path.join(os.path.dirname(__file__), "books_cache.json")
+            
+            # Format data for saving
+            data = {
+                "books": {book_data.get("id", str(uuid.uuid4())): {
+                    "title": title,
+                    "author": book_data["author"],
+                    "content": book_data["content"]
+                } for title, book_data in self.books.items()},
+                "chunks": self.chunks
+            }
+            
+            with open(cache_file, 'w') as f:
+                json.dump(data, f, indent=2)
+                
+            print(f"Saved {len(self.books)} books and {len(self.chunks)} chunks to cache")
+        except Exception as e:
+            print(f"Error saving books to cache: {e}")
     
     def get_all_chunks(self) -> List[Dict]:
         """Return all text chunks with metadata"""
@@ -175,7 +241,7 @@ Aurelius consistently returns to the importance of accepting what cannot be chan
     
     def get_chunks_by_book_id(self, book_id: str) -> List[Dict]:
         """Get all chunks for a specific book ID"""
-        # Add debug print
+        # Print debug information
         print(f"Looking for chunks with book_id: {book_id}")
         
         # Find chunks with this book_id
@@ -184,14 +250,22 @@ Aurelius consistently returns to the importance of accepting what cannot be chan
         # If no chunks found, try to fetch from Supabase
         if not chunks:
             print(f"No chunks found in memory for book_id: {book_id}")
-            try:
-                # This is where we would add Supabase integration if needed
-                # For now, just log a message
-                print("Would fetch chunks from database here if integrated")
-            except Exception as e:
-                print(f"Error fetching chunks from database: {e}")
+            # Reload external books in case new data is available
+            self._load_external_books()
+            
+            # Try again after reloading
+            chunks = [chunk for chunk in self.chunks if chunk.get("book_id") == book_id]
+            
+            if not chunks:
+                print(f"Still no chunks found for book_id {book_id} after reload")
+            else:
+                print(f"Found {len(chunks)} chunks after reloading external books")
         
-        print(f"Found {len(chunks)} chunks for book_id: {book_id}")
+        # Print debug information about the chunks found
+        print(f"Found {len(chunks)} chunks for book_id {book_id}")
+        if chunks:
+            print(f"First chunk title: {chunks[0].get('title')}, length: {len(chunks[0].get('text', ''))}")
+        
         return chunks
     
     def get_books(self) -> List[Dict]:

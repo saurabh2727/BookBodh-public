@@ -37,7 +37,7 @@ def retrieve_chunks(query: str, book: Optional[str] = None, book_id: Optional[st
                 chunks.append({
                     "text": chunk_data["text"],
                     "title": chunk_data["title"],
-                    "author": chunk_data["author"],
+                    "author": chunk_data.get("author", "Unknown"),
                     "score": 1.0  # Direct match, so highest score
                 })
             
@@ -45,6 +45,14 @@ def retrieve_chunks(query: str, book: Optional[str] = None, book_id: Optional[st
             return chunks
         else:
             print(f"No chunks found for book_id {book_id}")
+            # Additional debug info if no chunks found with book_id
+            try:
+                books = book_db.get_books()
+                print(f"Available books in the database: {len(books)}")
+                for b in books:
+                    print(f"Book: {b.get('title', 'Unknown')}, ID: {b.get('id', 'None')}")
+            except Exception as e:
+                print(f"Error getting books list: {e}")
     
     # If no book_id or no chunks found with book_id, try using book title
     if book and not chunks:
@@ -61,7 +69,7 @@ def retrieve_chunks(query: str, book: Optional[str] = None, book_id: Optional[st
                 chunks.append({
                     "text": chunk_data["text"],
                     "title": chunk_data["title"],
-                    "author": chunk_data["author"],
+                    "author": chunk_data.get("author", "Unknown"),
                     "score": float(score)
                 })
         
@@ -82,7 +90,7 @@ def retrieve_chunks(query: str, book: Optional[str] = None, book_id: Optional[st
                 chunks.append({
                     "text": chunk_data["text"],
                     "title": chunk_data["title"],
-                    "author": chunk_data["author"],
+                    "author": chunk_data.get("author", "Unknown"),
                     "score": float(score)
                 })
         

@@ -18,6 +18,8 @@ async function processBookText(text: string, title: string, chunkSize = 500) {
   let wordCount = 0;
   
   for (const word of words) {
+    if (word.trim().length === 0) continue; // Skip empty words
+    
     currentChunk.push(word);
     wordCount++;
     
@@ -48,51 +50,82 @@ async function processBookText(text: string, title: string, chunkSize = 500) {
   });
 }
 
-// Simple function to extract text from PDF bytes
+// Improved function to extract text from PDF bytes
 async function extractTextFromPDF(buffer: ArrayBuffer) {
-  // This is a very basic text extraction that looks for text streams in the PDF
-  // For production use, you'd want to use a proper PDF parsing library
+  console.log("Extracting text from PDF buffer of size: ", buffer.byteLength);
+  
   const decoder = new TextDecoder('utf-8');
   const bytes = new Uint8Array(buffer);
   let text = "";
   
-  // Convert bytes to string and look for text content
+  // Try multiple PDF text extraction methods
+  
+  // Method 1: Look for text streams
+  console.log("Trying extraction method 1: Text streams");
   const pdfString = decoder.decode(bytes);
   
-  // Very simple regex to extract text content from PDF
-  // This is not comprehensive but can extract some basic text
-  const textMatches = pdfString.match(/\(\(([^)]+)\)\)/g) || [];
-  textMatches.forEach(match => {
-    text += match.replace(/\(\(|\)\)/g, '') + " ";
-  });
-  
-  // If the simple approach didn't find text, try another method
-  if (text.trim().length < 100) {
-    // Look for text between BT (Begin Text) and ET (End Text) markers
-    const btEtMatches = pdfString.match(/BT[\s\S]+?ET/g) || [];
-    btEtMatches.forEach(match => {
-      // Extract text content from BT/ET blocks
-      const contentMatch = match.match(/\[((?:[^\]\\]|\\.)*)\]/g) || [];
-      contentMatch.forEach(cm => {
-        text += cm.replace(/^\[|\]$/g, '') + " ";
-      });
-    });
+  // Look for text objects with TJ or Tj operators
+  const textMatches = pdfString.match(/\[((?:[^\]\\]|\\.)*)\]\s*TJ|\(((?:[^)\\]|\\.)*)\)\s*Tj/g) || [];
+  for (const match of textMatches) {
+    // Clean up text by removing PDF encoding
+    let cleanText = match
+      .replace(/\\\(/g, '(')
+      .replace(/\\\)/g, ')')
+      .replace(/\\\\/g, '\\')
+      .replace(/\\n/g, ' ')
+      .replace(/\\r/g, ' ');
+      
+    // Remove brackets, TJ, Tj operators
+    cleanText = cleanText.replace(/\[(.*)\]\s*TJ|\((.*)\)\s*Tj/g, '$1$2');
+    
+    if (cleanText.trim().length > 0) {
+      text += cleanText + " ";
+    }
   }
   
-  // Cleanup the extracted text - fix to handle Unicode escape sequences
-  text = text.replace(/\\n/g, ' ')
-             .replace(/\\r/g, ' ')
-             .replace(/\\\(/g, '(')
-             .replace(/\\\)/g, ')')
-             .replace(/\\\\/g, '\\')
-             .replace(/\\u[0-9a-fA-F]{4}/g, '') // Remove Unicode escape sequences
-             .replace(/\s+/g, ' ')
+  // Method 2: Try to extract text between BT and ET markers
+  if (text.trim().length < 200) {
+    console.log("Trying extraction method 2: BT/ET blocks");
+    const btEtMatches = pdfString.match(/BT[\s\S]+?ET/g) || [];
+    for (const match of btEtMatches) {
+      // Extract text content from BT/ET blocks
+      const contentMatch = match.match(/\[((?:[^\]\\]|\\.)*)\]|(\((?:[^)\\]|\\.)*\))/g) || [];
+      for (const cm of contentMatch) {
+        let cleanText = cm.replace(/^\[|\]$|\(|\)$/g, '');
+        if (cleanText.trim().length > 0) {
+          text += cleanText + " ";
+        }
+      }
+    }
+  }
+  
+  // Method 3: Look for plain text content
+  if (text.trim().length < 200) {
+    console.log("Trying extraction method 3: Plain text");
+    // Find PDF object streams that might contain text
+    const streamMatches = pdfString.match(/stream\r?\n([\s\S]*?)\r?\nendstream/g) || [];
+    for (const match of streamMatches) {
+      const streamContent = match.replace(/stream\r?\n|\r?\nendstream/g, '');
+      // Extract what looks like text
+      const textContent = streamContent.replace(/[^\x20-\x7E\t\r\n]/g, ' ').trim();
+      if (textContent.length > 50) {
+        text += textContent + " ";
+      }
+    }
+  }
+  
+  // Cleanup the extracted text
+  text = text.replace(/\\u[0-9a-fA-F]{4}/g, '') // Remove Unicode escape sequences
+             .replace(/\s+/g, ' ')              // Normalize whitespace
+             .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '') // Remove control chars
              .trim();
+  
+  console.log(`Extracted ${text.length} characters of text`);
   
   // If we still didn't get much text, return placeholder text for testing
   if (text.trim().length < 100) {
     console.log("Warning: Could not extract sufficient text from PDF. Using placeholder text.");
-    text = `This is placeholder text for ${new Date().toISOString()}. The PDF extraction was not successful, but this allows testing the rest of the pipeline. In a production environment, you would want to use a more robust PDF parsing library compatible with Deno.`;
+    text = `This is placeholder text for ${new Date().toISOString()}. The PDF extraction was not successful. This PDF may be scanned, encrypted, or using non-standard formatting that makes text extraction difficult.`;
   }
   
   return text;
@@ -254,7 +287,7 @@ Deno.serve(async (req) => {
         
         console.log("Valid PDF header detected");
         
-        // Extract text from PDF
+        // Extract text from PDF using improved function
         console.log("Extracting text from PDF...");
         const extractedText = await extractTextFromPDF(buffer);
         console.log(`Extracted ${extractedText.length} characters of text`);
@@ -287,7 +320,7 @@ Deno.serve(async (req) => {
               category,
               summary,
               file_url: `books/${bookId}.pdf`, // Placeholder URL
-              status: 'processed'
+              status: 'processing'
             }
           ])
           .select();
@@ -307,55 +340,87 @@ Deno.serve(async (req) => {
         const chunks = await processBookText(extractedText, title);
         console.log(`Created ${chunks.length} chunks from book text`);
         
-        // Insert chunks into database
-        if (chunks.length > 0) {
-          // Format chunks for database insertion
-          const chunksToInsert = chunks.map(chunk => ({
-            book_id: bookId,
-            chunk_index: chunk.chunk_index,
-            title: chunk.title,
-            text: chunk.text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, ''), // Clean text
-            summary: chunk.summary.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '') // Clean summary
-          }));
+        // Use EdgeRuntime.waitUntil to process chunks in the background
+        EdgeRuntime.waitUntil((async () => {
+          console.log("Starting background chunk processing");
+          let successCount = 0;
+          let errorCount = 0;
           
-          console.log(`Inserting ${chunksToInsert.length} chunks into database...`);
-          
-          for (let i = 0; i < chunksToInsert.length; i++) {
-            const chunk = chunksToInsert[i];
-            const { error: chunkError } = await supabaseClient
-              .from('book_chunks')
-              .insert([chunk]);
+          try {
+            // Insert chunks into database
+            if (chunks.length > 0) {
+              // Capture insert results for each chunk
+              for (let i = 0; i < chunks.length; i++) {
+                const chunk = chunks[i];
+                
+                // Clean chunk text of control characters
+                const cleanedText = chunk.text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '');
+                const cleanedSummary = chunk.summary.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '');
+                
+                const { error: chunkError } = await supabaseClient
+                  .from('book_chunks')
+                  .insert([{
+                    book_id: bookId,
+                    chunk_index: chunk.chunk_index,
+                    title: chunk.title,
+                    text: cleanedText,
+                    summary: cleanedSummary
+                  }]);
+                  
+                if (chunkError) {
+                  console.error(`Error inserting chunk ${i}:`, chunkError);
+                  console.error("Error details:", JSON.stringify(chunkError, null, 2));
+                  errorCount++;
+                } else {
+                  successCount++;
+                }
+                
+                // Add a short delay between inserts to avoid overwhelming the database
+                if (i % 5 === 0 && i > 0) {
+                  await new Promise(resolve => setTimeout(resolve, 100));
+                }
+              }
+            }
+            
+            // Update book status based on chunk processing results
+            const finalStatus = errorCount === 0 ? 'processed' : 
+                               (successCount > 0 ? 'partially_processed' : 'failed');
+                               
+            const { error: updateError } = await supabaseClient
+              .from('books')
+              .update({ 
+                status: finalStatus,
+                chunks_count: successCount,
+                failed_chunks: errorCount
+              })
+              .eq('id', bookId);
               
-            if (chunkError) {
-              console.error(`Error inserting chunk ${i}:`, chunkError);
-              console.error("Chunk data causing error:", JSON.stringify({
-                chunk_index: chunk.chunk_index,
-                title_length: chunk.title.length,
-                text_length: chunk.text.length,
-                summary_length: chunk.summary.length
-              }));
+            if (updateError) {
+              console.error("Error updating book status:", updateError);
             } else {
-              console.log(`Successfully inserted chunk ${i}`);
+              console.log(`Book processing completed with status: ${finalStatus}`);
+              console.log(`Successfully processed ${successCount} chunks with ${errorCount} failures`);
+            }
+          } catch (error) {
+            console.error("Background processing error:", error);
+            // Try to update book status on error
+            try {
+              await supabaseClient
+                .from('books')
+                .update({ 
+                  status: 'error',
+                  chunks_count: successCount,
+                  failed_chunks: errorCount
+                })
+                .eq('id', bookId);
+            } catch (updateError) {
+              console.error("Failed to update book status after error:", updateError);
             }
           }
-          
-          console.log("Book chunks insertion completed");
-        } else {
-          console.warn("No chunks were created from the book text");
-          
-          // Update book status to indicate no chunks were created
-          const { error: updateError } = await supabaseClient
-            .from('books')
-            .update({ status: 'no_chunks' })
-            .eq('id', bookId);
-            
-          if (updateError) {
-            console.error("Error updating book status:", updateError);
-          }
-        }
+        })());
         
-        // Return success response
-        console.log("Upload completed successfully");
+        // Return success response while processing continues in the background
+        console.log("Upload completed successfully, background processing started");
         return new Response(
           JSON.stringify({
             success: true,
