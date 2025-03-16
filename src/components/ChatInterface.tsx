@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import BookSelector from './BookSelector';
 import ChatWelcome from './chat/ChatWelcome';
@@ -8,10 +9,20 @@ import useChat from '@/hooks/useChat';
 import { Book } from '@/types';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
-import { Upload } from 'lucide-react';
+import { Upload, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { fetchUserBooks } from '@/services/api';
+import { fetchUserBooks, deleteBook } from '@/services/api';
 import { useToast } from "@/components/ui/use-toast";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface ChatInterfaceProps {
   selectedBookId?: string | null;
@@ -21,7 +32,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedBookId }) => {
   const [showBookSelector, setShowBookSelector] = useState<boolean>(false);
   const [showBookUpload, setShowBookUpload] = useState<boolean>(false);
   const [selectedBook, setSelectedBook] = useState<Book | null>(null);
-  const [bookSuggestions, setBookSuggestions] = useState<string[]>([]);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<boolean>(false);
   const navigate = useNavigate();
   const { toast } = useToast();
   
@@ -34,24 +45,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedBookId }) => {
     error
   } = useChat(selectedBook?.title || null, selectedBookId);
 
-  useEffect(() => {
-    if (selectedBookId && selectedBook) {
-      setBookSuggestions([
-        `What is the main idea of ${selectedBook.title}?`,
-        `Tell me about ${selectedBook.title} by ${selectedBook.author}`,
-        `Summarize ${selectedBook.title}`,
-        `What can I learn from ${selectedBook.title}?`
-      ]);
-    } else {
-      setBookSuggestions([
-        "What books do I have?",
-        "Summarize all my books",
-        "Which book should I read first?",
-        "Compare the books in my library"
-      ]);
-    }
-  }, [selectedBookId, selectedBook]);
-
   const handleSelectBookClick = () => {
     setShowBookSelector(true);
   };
@@ -60,11 +53,50 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedBookId }) => {
     setShowBookUpload(true);
   };
 
+  const handleDeleteBookClick = () => {
+    if (selectedBook) {
+      setShowDeleteConfirm(true);
+    }
+  };
+
   const handleBookSelection = (book: Book) => {
     setSelectedBook(book);
     setShowBookSelector(false);
     
     navigate(`/chat/${book.id}`);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!selectedBook) return;
+    
+    try {
+      const result = await deleteBook(selectedBook.id);
+      
+      if (result.success) {
+        toast({
+          title: "Book deleted",
+          description: "The book and its data have been removed successfully.",
+        });
+        
+        // Navigate back to general chat
+        navigate('/chat');
+        setSelectedBook(null);
+      } else {
+        toast({
+          variant: "destructive",
+          title: "Delete failed",
+          description: result.message || "Failed to delete the book.",
+        });
+      }
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Delete failed",
+        description: error instanceof Error ? error.message : "An unknown error occurred.",
+      });
+    } finally {
+      setShowDeleteConfirm(false);
+    }
   };
 
   const handleUploadComplete = (success: boolean, message: string, bookId?: string) => {
@@ -122,6 +154,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedBookId }) => {
             description: "There was a problem loading the book data.",
           });
         }
+      } else {
+        // Reset selected book if no ID is provided
+        setSelectedBook(null);
       }
     };
 
@@ -155,6 +190,17 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedBookId }) => {
               >
                 Select Book
               </Button>
+              {selectedBook && (
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="flex items-center gap-2 text-destructive hover:bg-destructive/10"
+                  onClick={handleDeleteBookClick}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete Book
+                </Button>
+              )}
               <Button 
                 variant="outline" 
                 size="sm" 
@@ -169,8 +215,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedBookId }) => {
           <ChatMessages messages={messages} />
           <ChatControls 
             onSubmit={handleSubmit} 
-            isLoading={isLoading} 
-            suggestions={bookSuggestions}
+            isLoading={isLoading}
+            selectedBookId={selectedBookId}
+            selectedBookTitle={selectedBook?.title || null}
           />
         </>
       )}
@@ -197,6 +244,23 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedBookId }) => {
           </SheetContent>
         </Sheet>
       )}
+
+      <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Book</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete "{selectedBook?.title}"? This action cannot be undone and will remove all associated book data and chat history.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

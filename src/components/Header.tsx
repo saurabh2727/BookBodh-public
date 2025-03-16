@@ -1,51 +1,47 @@
 
 import React from 'react';
-import ThemeToggle from '@/components/ThemeToggle';
 import { Button } from '@/components/ui/button';
-import { LogOut } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { Menu, BookOpen, LogOut } from 'lucide-react';
+import { signOut } from '@/services/api';
+import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
+import ThemeToggle from './ThemeToggle';
 
 const Header: React.FC = () => {
+  const navigate = useNavigate();
   const { toast } = useToast();
 
   const handleSignOut = async () => {
     try {
-      await supabase.auth.signOut();
+      await signOut();
+      navigate('/login');
+    } catch (error) {
       toast({
-        title: "Signed out successfully",
-        description: "You have been logged out of your account."
-      });
-    } catch (error: any) {
-      toast({
-        title: "Error signing out",
-        description: error.message,
-        variant: "destructive"
+        variant: "destructive",
+        title: "Sign out failed",
+        description: "Failed to sign out. Please try again.",
       });
     }
   };
 
   return (
-    <header className="border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="container flex h-14 max-w-screen-xl items-center">
-        <div className="mr-4 flex">
-          <a href="/" className="flex items-center space-x-2">
-            <span className="font-bold inline-block">BookBodh</span>
-          </a>
-        </div>
-        <div className="flex flex-1 items-center justify-end space-x-2">
-          <nav className="flex items-center space-x-2">
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              onClick={handleSignOut} 
-              title="Sign out"
-            >
-              <LogOut className="h-[1.2rem] w-[1.2rem]" />
-            </Button>
-            <ThemeToggle />
-          </nav>
-        </div>
+    <header className="flex justify-between items-center py-4 px-6 border-b bg-background/80 backdrop-blur-sm">
+      <div className="flex items-center">
+        <BookOpen className="h-6 w-6 mr-2 text-primary" />
+        <h1 className="text-xl font-bold">BookBodh</h1>
+      </div>
+      
+      <div className="flex items-center gap-3">
+        <ThemeToggle />
+        <Button 
+          variant="ghost" 
+          size="icon"
+          onClick={handleSignOut}
+          title="Sign Out"
+          className="rounded-full"
+        >
+          <LogOut className="h-5 w-5" />
+        </Button>
       </div>
     </header>
   );

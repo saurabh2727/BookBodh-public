@@ -7,6 +7,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/cors.ts';
 
 const GROK_API_KEY = Deno.env.get('GROK_API_KEY') || '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';
+const MAX_TOKENS = 5000; // Setting a safe limit below the 6000 TPM limit
 
 interface RequestPayload {
   query: string;
@@ -26,6 +27,104 @@ interface ChatCompletion {
       content: string;
     };
   }>;
+}
+
+// Helper function to estimate token count (rough estimate: 1 token ~ 4 characters)
+function estimateTokenCount(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
+// Helper function to truncate context while preserving whole chunks if possible
+function truncateContext(chunks: Array<{title: string, author: string, text: string, summary?: string}>, maxTokens: number): string {
+  let context = '';
+  let totalTokens = 0;
+  const chunkIntros: string[] = [];
+  const summaries: string[] = [];
+  
+  // First prepare the chunk intros and summaries separately
+  chunks.forEach((chunk, i) => {
+    const chunkIntro = `\nChunk ${i+1} from '${chunk.title || 'Unknown'}' by ${chunk.author || 'Unknown'}: `;
+    const contentToUse = chunk.summary || chunk.text?.substring(0, 200) || 'No content available';
+    
+    chunkIntros.push(chunkIntro);
+    summaries.push(contentToUse);
+  });
+  
+  // Now build the context, adding chunks until we reach token limit
+  for (let i = 0; i < chunks.length; i++) {
+    const nextChunkIntro = chunkIntros[i];
+    const nextSummary = summaries[i];
+    const nextChunkTokens = estimateTokenCount(nextChunkIntro + nextSummary);
+    
+    // If adding this chunk would exceed the limit, stop
+    if (totalTokens + nextChunkTokens > maxTokens) {
+      break;
+    }
+    
+    // Add the chunk to the context
+    context += nextChunkIntro + nextSummary + '\n';
+    totalTokens += nextChunkTokens;
+  }
+  
+  console.log(`Built context with approximately ${totalTokens} tokens`);
+  return context;
+}
+
+// Implement retrying with exponential backoff
+async function callGrokWithRetry(prompt: string, maxRetries = 3): Promise<ChatCompletion> {
+  let retries = 0;
+  let delay = 1000; // Start with 1 second delay
+  
+  while (retries < maxRetries) {
+    try {
+      console.log(`Calling Grok API (attempt ${retries + 1})`);
+      
+      const grokResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${GROK_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: 'llama-3.1-8b-instant',
+          messages: [
+            { role: 'system', content: 'You are a helpful assistant that provides insights from books.' },
+            { role: 'user', content: prompt }
+          ],
+          temperature: 0.7,
+          max_tokens: 800
+        })
+      });
+
+      if (grokResponse.status === 429) {
+        // Rate limit error, retry with backoff
+        console.log(`Received 429 rate limit error, retrying in ${delay}ms`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        delay *= 2; // Exponential backoff
+        retries++;
+        continue;
+      }
+
+      if (!grokResponse.ok) {
+        const errorText = await grokResponse.text();
+        console.error(`Grok API error: ${grokResponse.status} - ${errorText}`);
+        throw new Error(`Grok API error: ${grokResponse.status} - ${errorText}`);
+      }
+
+      return await grokResponse.json() as ChatCompletion;
+    } catch (error) {
+      if (retries >= maxRetries - 1) {
+        throw error; // Re-throw the error if we've exhausted our retries
+      }
+      
+      console.log(`Error calling Grok API: ${error.message}, retrying in ${delay}ms`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      delay *= 2; // Exponential backoff
+      retries++;
+    }
+  }
+  
+  throw new Error('Maximum retries exceeded');
 }
 
 Deno.serve(async (req) => {
@@ -136,6 +235,8 @@ Deno.serve(async (req) => {
         }
         
         console.log('Book data found:', bookData);
+        bookTitle = bookData.title;
+        bookAuthor = bookData.author;
         
         // Then get the chunks
         const { data: chunkData, error: chunkError } = await supabaseClient
@@ -158,9 +259,6 @@ Deno.serve(async (req) => {
         console.log(`Found ${chunkData?.length || 0} chunks for book ID: ${bookId}`);
         
         if (chunkData && chunkData.length > 0) {
-          bookTitle = bookData.title;
-          bookAuthor = bookData.author;
-          
           chunks = chunkData.map(chunk => ({
             title: chunk.title || bookData.title,
             author: bookData.author,
@@ -190,7 +288,8 @@ Deno.serve(async (req) => {
         const { data: booksData, error: booksError } = await supabaseClient
           .from('books')
           .select('id, title, author, summary')
-          .filter('summary', 'not.is', null);
+          .order('created_at', { ascending: false })
+          .limit(10); // Limit to recent books to avoid token overflow
           
         if (booksError) {
           console.error('Error fetching books:', booksError);
@@ -223,21 +322,17 @@ Deno.serve(async (req) => {
           console.warn(`Missing title or author for chunk ${i}`);
         }
         
-        // Use the summary when available instead of full text for more concise context
-        const contentToUse = chunk.summary || chunk.text;
-        if (!contentToUse) {
-          console.warn(`Missing content for chunk ${i}`);
-        }
-        
-        context += `\nChunk ${i+1} from '${chunk.title || 'Unknown'}' by ${chunk.author || 'Unknown'}:\n${contentToUse || 'No content available'}\n`;
-        book_citations[chunk.title || 'Unknown'] = chunk.author || 'Unknown';
-        
         // Use the first chunk's book info as the citation if not already set
         if (!bookTitle) {
           bookTitle = chunk.title;
           bookAuthor = chunk.author;
         }
+        
+        book_citations[chunk.title || 'Unknown'] = chunk.author || 'Unknown';
       });
+      
+      // Build and truncate context to fit token limits
+      context = truncateContext(chunks, MAX_TOKENS);
     } else {
       console.log('No chunks available for context');
       context = "No book context available. I'll try to answer based on general knowledge.";
@@ -252,34 +347,11 @@ Always cite the book and author when referencing information from the texts.
 If the answer cannot be found in the provided context, indicate that clearly.
 Provide a thoughtful, well-reasoned response with quotations from the book where appropriate.`;
 
-    console.log('Calling Grok API');
+    console.log(`Prompt length: ${prompt.length} characters (approximately ${estimateTokenCount(prompt)} tokens)`);
     
-    // Call Grok API
+    // Call Grok API with retry logic
     try {
-      const grokResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${GROK_API_KEY}`
-        },
-        body: JSON.stringify({
-          model: 'llama-3.1-8b-instant',
-          messages: [
-            { role: 'system', content: 'You are a helpful assistant that provides insights from books.' },
-            { role: 'user', content: prompt }
-          ],
-          temperature: 0.7,
-          max_tokens: 800
-        })
-      });
-
-      if (!grokResponse.ok) {
-        const errorText = await grokResponse.text();
-        console.error(`Grok API error: ${grokResponse.status} - ${errorText}`);
-        throw new Error(`Grok API error: ${grokResponse.status} - ${errorText}`);
-      }
-
-      const grokData = await grokResponse.json() as ChatCompletion;
+      const grokData = await callGrokWithRetry(prompt);
       const responseText = grokData.choices[0].message.content;
       console.log('Got response from Grok API');
 

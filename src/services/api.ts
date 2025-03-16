@@ -94,6 +94,44 @@ export const uploadBook = async (
 };
 
 /**
+ * Deletes a book and its associated data
+ * @param bookId The ID of the book to delete
+ * @returns Promise with the deletion response
+ */
+export const deleteBook = async (bookId: string): Promise<{ success: boolean; message: string }> => {
+  try {
+    console.log('Deleting book with ID:', bookId);
+    
+    // Get the current session
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    if (!session) {
+      throw new Error('User not authenticated');
+    }
+    
+    // Call the delete-book edge function
+    const { data, error } = await supabase.functions.invoke('delete-book', {
+      method: 'POST',
+      body: { bookId },
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+      },
+    });
+
+    if (error) {
+      console.error('Edge function error:', error);
+      throw new Error(error.message || 'Error deleting book');
+    }
+
+    console.log('Delete response:', data);
+    return data;
+  } catch (error) {
+    console.error('Book deletion error:', error);
+    throw error;
+  }
+};
+
+/**
  * Fetches user's uploaded books
  * @returns Promise with the list of books
  */
