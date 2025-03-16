@@ -1,9 +1,11 @@
+
 import React, { useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Upload, FileText, CheckCircle, AlertCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { uploadBook } from '@/services/api';
 
 interface BookUploadProps {
   onUploadComplete?: (success: boolean, message: string) => void;
@@ -75,10 +77,8 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete, onClose }) =>
     setIsUploading(true);
     setUploadProgress(0);
     
-    const formData = new FormData();
-    formData.append('file', file);
-    
     try {
+      // Simulate upload progress
       const progressInterval = setInterval(() => {
         setUploadProgress(prev => {
           const newProgress = Math.min(prev + 10, 90);
@@ -86,43 +86,39 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete, onClose }) =>
         });
       }, 300);
       
-      const response = await fetch('http://localhost:8000/upload-book', {
-        method: 'POST',
-        body: formData,
-      });
+      // Call our uploadBook function from the API
+      const response = await uploadBook(file);
       
       clearInterval(progressInterval);
       setUploadProgress(100);
       
-      if (response.ok) {
-        const data = await response.json();
+      if (response.success) {
         toast({
           title: "Upload Successful",
-          description: data.message || "Book uploaded successfully!",
+          description: response.message || "Book uploaded successfully!",
         });
         if (onUploadComplete) {
-          onUploadComplete(true, data.message);
+          onUploadComplete(true, response.message);
         }
         setFile(null);
       } else {
-        const error = await response.json();
         toast({
           title: "Upload Failed",
-          description: error.detail || "Failed to upload book.",
+          description: response.message || "Failed to upload book.",
           variant: "destructive"
         });
         if (onUploadComplete) {
-          onUploadComplete(false, error.detail);
+          onUploadComplete(false, response.message);
         }
       }
     } catch (error) {
       toast({
         title: "Upload Error",
-        description: "An error occurred during upload. Please try again.",
+        description: error.message || "An error occurred during upload. Please try again.",
         variant: "destructive"
       });
       if (onUploadComplete) {
-        onUploadComplete(false, "Network error occurred");
+        onUploadComplete(false, error.message || "Network error occurred");
       }
     } finally {
       setIsUploading(false);

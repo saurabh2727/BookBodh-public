@@ -41,6 +41,48 @@ export const sendChatRequest = async (request: ChatRequest): Promise<ChatRespons
 };
 
 /**
+ * Uploads a book file to the Supabase Edge Function
+ * @param file The book file to upload
+ * @returns Promise with the upload response
+ */
+export const uploadBook = async (file: File): Promise<{ success: boolean; message: string; fileUrl?: string }> => {
+  try {
+    console.log('Uploading book to Supabase Edge Function');
+    
+    // Get the current session
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    if (!session) {
+      throw new Error('User not authenticated');
+    }
+    
+    // Create a FormData object
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    // Call the upload-book edge function
+    const { data, error } = await supabase.functions.invoke('upload-book', {
+      method: 'POST',
+      body: formData,
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+      },
+    });
+
+    if (error) {
+      console.error('Edge function error:', error);
+      throw new Error(error.message || 'Error uploading book');
+    }
+
+    console.log('Upload response:', data);
+    return data;
+  } catch (error) {
+    console.error('Book upload error:', error);
+    throw error;
+  }
+};
+
+/**
  * Checks if the user is authenticated
  * @returns Promise with the session data
  */
