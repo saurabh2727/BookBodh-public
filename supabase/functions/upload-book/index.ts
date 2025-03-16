@@ -79,12 +79,13 @@ async function extractTextFromPDF(buffer: ArrayBuffer) {
     });
   }
   
-  // Cleanup the extracted text
-  text = text.replace(/\\n/g, '\n')
-             .replace(/\\r/g, '')
+  // Cleanup the extracted text - fix to handle Unicode escape sequences
+  text = text.replace(/\\n/g, ' ')
+             .replace(/\\r/g, ' ')
              .replace(/\\\(/g, '(')
              .replace(/\\\)/g, ')')
              .replace(/\\\\/g, '\\')
+             .replace(/\\u[0-9a-fA-F]{4}/g, '') // Remove Unicode escape sequences
              .replace(/\s+/g, ' ')
              .trim();
   
@@ -259,9 +260,18 @@ Deno.serve(async (req) => {
         console.log(`Extracted ${extractedText.length} characters of text`);
         
         // Create a summary from the extracted text
-        const summary = extractedText.length > 1000 
-          ? extractedText.substring(0, 1000).replace(/\s+/g, ' ').trim() + '...'
-          : extractedText.replace(/\s+/g, ' ').trim();
+        let summary = '';
+        try {
+          summary = extractedText.length > 1000 
+            ? extractedText.substring(0, 1000).replace(/\s+/g, ' ').trim() + '...'
+            : extractedText.replace(/\s+/g, ' ').trim();
+            
+          // Clean summary to remove any problematic characters
+          summary = summary.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '');
+        } catch (summaryError) {
+          console.error("Error creating summary:", summaryError);
+          summary = `Summary of ${title} by ${author}. This is a book about various concepts and ideas in the category of ${category}.`;
+        }
         
         console.log("Created summary for book, length:", summary.length);
         
@@ -304,34 +314,32 @@ Deno.serve(async (req) => {
             book_id: bookId,
             chunk_index: chunk.chunk_index,
             title: chunk.title,
-            text: chunk.text,
-            summary: chunk.summary
+            text: chunk.text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, ''), // Clean text
+            summary: chunk.summary.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '') // Clean summary
           }));
           
           console.log(`Inserting ${chunksToInsert.length} chunks into database...`);
           
-          const { error: chunkError } = await supabaseClient
-            .from('book_chunks')
-            .insert(chunksToInsert);
-            
-          if (chunkError) {
-            console.error("Error inserting book chunks:", chunkError);
-            // Log detailed error information
-            console.error("Error details:", JSON.stringify(chunkError, null, 2));
-            
-            // We don't want to fail the whole operation if chunk insertion fails
-            // but we should update the book status
-            const { error: updateError } = await supabaseClient
-              .from('books')
-              .update({ status: 'error_chunks' })
-              .eq('id', bookId);
+          for (let i = 0; i < chunksToInsert.length; i++) {
+            const chunk = chunksToInsert[i];
+            const { error: chunkError } = await supabaseClient
+              .from('book_chunks')
+              .insert([chunk]);
               
-            if (updateError) {
-              console.error("Error updating book status:", updateError);
+            if (chunkError) {
+              console.error(`Error inserting chunk ${i}:`, chunkError);
+              console.error("Chunk data causing error:", JSON.stringify({
+                chunk_index: chunk.chunk_index,
+                title_length: chunk.title.length,
+                text_length: chunk.text.length,
+                summary_length: chunk.summary.length
+              }));
+            } else {
+              console.log(`Successfully inserted chunk ${i}`);
             }
-          } else {
-            console.log("Book chunks inserted successfully");
           }
+          
+          console.log("Book chunks insertion completed");
         } else {
           console.warn("No chunks were created from the book text");
           

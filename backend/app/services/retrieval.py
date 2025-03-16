@@ -22,13 +22,14 @@ def retrieve_chunks(query: str, book: Optional[str] = None, book_id: Optional[st
     # Print debug information
     print(f"Retrieving chunks for query: {query}, book: {book}, book_id: {book_id}")
     
+    chunks = []
+    
     # If book_id is provided, get all chunks for that book
     if book_id:
         # Log that we're using book_id for retrieval
         print(f"Using book_id {book_id} for retrieval")
         
         # Get all chunks for this book from the database
-        chunks = []
         book_chunks = book_db.get_chunks_by_book_id(book_id)
         
         if book_chunks:
@@ -67,7 +68,7 @@ def retrieve_chunks(query: str, book: Optional[str] = None, book_id: Optional[st
         print(f"Found {len(chunks)} chunks using semantic search for book '{book}'")
     
     # If no book specified or no chunks found with book title, try general search
-    if not book and not book_id or not chunks:
+    if (not book and not book_id) or not chunks:
         print("Using general search across all books")
         
         # Get embeddings for the query across all books
