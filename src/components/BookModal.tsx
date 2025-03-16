@@ -56,7 +56,9 @@ const BookModal: React.FC<BookModalProps> = ({ book, isOpen, onClose }) => {
         
         <div className="py-4">
           <p className="text-sm text-foreground/90 leading-relaxed">
-            {book.summary}
+            {book.summary && !book.summary.startsWith('%PDF') 
+              ? book.summary 
+              : "No readable summary available for this book."}
           </p>
         </div>
         

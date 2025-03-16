@@ -17,7 +17,7 @@ const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 // Extract text from PDF using pdfjs
 const extractTextFromPDF = async (fileBuffer: Uint8Array): Promise<string> => {
-  console.log('Starting PDF text extraction');
+  console.log('Starting improved PDF text extraction');
   try {
     // Initialize PDF.js
     const loadingTask = pdfjs.getDocument({ data: fileBuffer });
@@ -33,6 +33,7 @@ const extractTextFromPDF = async (fileBuffer: Uint8Array): Promise<string> => {
       
       // Combine text items into a single string with proper spacing
       const pageText = textContent.items
+        .filter((item: any) => 'str' in item && typeof item.str === 'string')
         .map((item: any) => item.str)
         .join(' ')
         .replace(/\s+/g, ' ');
@@ -44,7 +45,7 @@ const extractTextFromPDF = async (fileBuffer: Uint8Array): Promise<string> => {
       }
     }
     
-    // Clean up the text
+    // Clean up the text - remove PDF metadata markers and other unwanted patterns
     fullText = fullText
       .trim()
       .replace(/\s+/g, ' ')         // Normalize whitespace
@@ -52,9 +53,56 @@ const extractTextFromPDF = async (fileBuffer: Uint8Array): Promise<string> => {
       .replace(/&#172;/g, '¬')      // Fix common character issues
       .replace(/&#163;/g, '£')
       .replace(/&#128;/g, '€')
-      .replace(/\n{3,}/g, '\n\n');  // Normalize multiple newlines
+      .replace(/\n{3,}/g, '\n\n')   // Normalize multiple newlines
+      .replace(/%PDF[\s\S]*?obj/g, '') // Remove PDF metadata markers
+      .replace(/<<\/[\s\S]*?>>/g, '') // Remove PDF object references
+      .replace(/\d+ \d+ R/g, '')    // Remove PDF references
+      .replace(/\[\s*\d+\s+\d+\s+\d+\s+\d+\s*\]/g, '') // Remove PDF coordinates
+      .replace(/obj<.*?>/g, '')     // Remove remaining obj markers
+      .replace(/endobj/g, '')       // Remove endobj markers
+      .replace(/stream[\s\S]*?endstream/g, '') // Remove stream content
+      .replace(/\d+\s+\d+\s+obj/g, ''); // Remove object definitions
     
-    console.log(`Extracted ${fullText.length} characters of text`);
+    // If the text still contains too many PDF markers, try an alternative approach
+    if (fullText.includes('%PDF') || fullText.includes('obj<<') || fullText.length < 1000) {
+      console.log('Text still contains PDF markers, using alternative extraction method');
+      fullText = '';
+      
+      // Alternative extraction focusing only on readable text sections
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        
+        // Focus on text items that look like actual content
+        const pageText = textContent.items
+          .filter((item: any) => {
+            return 'str' in item && 
+                   typeof item.str === 'string' && 
+                   item.str.length > 1 &&
+                   !item.str.match(/%PDF|obj<|endobj|\d+ \d+ R/);
+          })
+          .map((item: any) => item.str)
+          .join(' ');
+        
+        fullText += pageText + ' ';
+      }
+      
+      fullText = fullText.trim().replace(/\s+/g, ' ');
+    }
+    
+    // Final validation - if we still have PDF markers, just extract plain alphabetic content
+    if (fullText.includes('%PDF') || fullText.length < 500) {
+      console.log('Falling back to basic text extraction');
+      // Extract only alphabetic content with spaces and basic punctuation
+      fullText = fullText.replace(/[^a-zA-Z0-9\s\.,;:!?'"()-]/g, ' ').replace(/\s+/g, ' ').trim();
+    }
+    
+    console.log(`Extracted ${fullText.length} characters of cleaned text`);
+    
+    if (fullText.length < 500) {
+      console.warn('Warning: Extracted text is very short, PDF might not contain extractable text');
+    }
+    
     return fullText;
   } catch (error) {
     console.error('Error extracting PDF text:', error);
@@ -76,7 +124,7 @@ const extractFirstPageAsImage = async (fileBuffer: Uint8Array): Promise<Uint8Arr
     }
     
     const page = await pdf.getPage(1);
-    const viewport = page.getViewport({ scale: 1.0 });
+    const viewport = page.getViewport({ scale: 1.5 }); // Increase scale for better quality
     
     // Create a canvas to render the page
     const canvas = new OffscreenCanvas(viewport.width, viewport.height);
@@ -86,6 +134,10 @@ const extractFirstPageAsImage = async (fileBuffer: Uint8Array): Promise<Uint8Arr
       console.warn('Could not get canvas context');
       return null;
     }
+    
+    // Set white background
+    context.fillStyle = 'white';
+    context.fillRect(0, 0, viewport.width, viewport.height);
     
     // Render PDF page to canvas
     await page.render({
@@ -140,7 +192,7 @@ const chunkText = (text: string, chunkSize = 500): string[] => {
   return chunks;
 };
 
-// Generate a summary for a chunk of text
+// Generate a human-readable summary for a chunk of text
 const generateSummary = (text: string, maxWords = 50): string => {
   // Find the first few complete sentences if possible
   const sentencePattern = /^.+?[.!?](?:\s|$)/g;
@@ -333,6 +385,8 @@ serve(async (req) => {
     // Generate a summary for the whole book
     console.log('Generating book summary...');
     const wholeSummary = generateSummary(extractedText, 100);
+    
+    console.log('Book summary:', wholeSummary);
     
     // Insert book data into the database
     console.log('Inserting book data into database...');
