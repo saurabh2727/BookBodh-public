@@ -49,13 +49,6 @@ const BooksGrid: React.FC<BooksGridProps> = ({ onSelectBook }) => {
     setModalOpen(true);
   };
 
-  const handleChatWithBook = () => {
-    if (selectedBook) {
-      onSelectBook(selectedBook.id);
-      setModalOpen(false);
-    }
-  };
-
   if (loading) {
     return (
       <div className="space-y-10">
@@ -114,7 +107,6 @@ const BooksGrid: React.FC<BooksGridProps> = ({ onSelectBook }) => {
           book={selectedBook} 
           isOpen={modalOpen} 
           onClose={() => setModalOpen(false)} 
-          onChatWithBook={handleChatWithBook}
         />
       )}
     </div>
