@@ -35,6 +35,8 @@ Deno.serve(async (req) => {
   }
 
   try {
+    console.log('Processing chat request');
+    
     // Create Supabase client for the function context
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
@@ -49,7 +51,19 @@ Deno.serve(async (req) => {
     // Verify user is authenticated
     const {
       data: { user },
+      error: userError
     } = await supabaseClient.auth.getUser();
+
+    if (userError) {
+      console.error('Auth error:', userError);
+      return new Response(
+        JSON.stringify({ error: `Authentication error: ${userError.message}` }),
+        {
+          status: 401,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
 
     if (!user) {
       return new Response(
@@ -62,7 +76,14 @@ Deno.serve(async (req) => {
     }
 
     // Parse request body
-    const { query, book, bookId, chunks: providedChunks } = await req.json() as RequestPayload;
+    const requestData = await req.json().catch(err => {
+      console.error('Error parsing request body:', err);
+      throw new Error('Invalid request body');
+    });
+    
+    const { query, book, bookId, chunks: providedChunks } = requestData as RequestPayload;
+
+    console.log('Request details:', { query, book, bookId, hasProvidedChunks: !!providedChunks });
 
     if (!query) {
       return new Response(
@@ -84,86 +105,132 @@ Deno.serve(async (req) => {
     if (bookId && !chunks.length) {
       console.log(`Fetching chunks for book ID: ${bookId}`);
       
-      // First get the book details
-      const { data: bookData, error: bookError } = await supabaseClient
-        .from('books')
-        .select('title, author')
-        .eq('id', bookId)
-        .single();
+      try {
+        // First get the book details
+        const { data: bookData, error: bookError } = await supabaseClient
+          .from('books')
+          .select('title, author')
+          .eq('id', bookId)
+          .single();
+          
+        if (bookError) {
+          console.error('Error fetching book:', bookError);
+          return new Response(
+            JSON.stringify({ error: `Error fetching book: ${bookError.message}` }),
+            {
+              status: 500,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            }
+          );
+        }
         
-      if (bookError) {
-        console.error('Error fetching book:', bookError);
+        if (!bookData) {
+          console.error('Book not found');
+          return new Response(
+            JSON.stringify({ error: `Book not found with ID: ${bookId}` }),
+            {
+              status: 404,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            }
+          );
+        }
+        
+        console.log('Book data found:', bookData);
+        
+        // Then get the chunks
+        const { data: chunkData, error: chunkError } = await supabaseClient
+          .from('book_chunks')
+          .select('chunk_index, title, text, summary')
+          .eq('book_id', bookId)
+          .order('chunk_index');
+          
+        if (chunkError) {
+          console.error('Error fetching chunks:', chunkError);
+          return new Response(
+            JSON.stringify({ error: `Error fetching chunks: ${chunkError.message}` }),
+            {
+              status: 500,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            }
+          );
+        }
+        
+        console.log(`Found ${chunkData?.length || 0} chunks for book ID: ${bookId}`);
+        
+        if (chunkData && chunkData.length > 0) {
+          bookTitle = bookData.title;
+          bookAuthor = bookData.author;
+          
+          chunks = chunkData.map(chunk => ({
+            title: chunk.title || bookData.title,
+            author: bookData.author,
+            text: chunk.text,
+            summary: chunk.summary || chunk.text.substring(0, 200) + '...'
+          }));
+        } else {
+          console.log('No chunks found for book');
+        }
+      } catch (err) {
+        console.error('Error in bookId processing:', err);
         return new Response(
-          JSON.stringify({ error: `Error fetching book: ${bookError.message}` }),
+          JSON.stringify({ error: `Error processing book data: ${err.message}` }),
           {
             status: 500,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           }
         );
-      }
-      
-      // Then get the chunks
-      const { data: chunkData, error: chunkError } = await supabaseClient
-        .from('book_chunks')
-        .select('chunk_index, title, text, summary')
-        .eq('book_id', bookId)
-        .order('chunk_index');
-        
-      if (chunkError) {
-        console.error('Error fetching chunks:', chunkError);
-        return new Response(
-          JSON.stringify({ error: `Error fetching chunks: ${chunkError.message}` }),
-          {
-            status: 500,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          }
-        );
-      }
-      
-      if (chunkData && chunkData.length > 0) {
-        bookTitle = bookData.title;
-        bookAuthor = bookData.author;
-        
-        chunks = chunkData.map(chunk => ({
-          title: chunk.title,
-          author: bookAuthor,
-          text: chunk.text,
-          summary: chunk.summary
-        }));
       }
     }
     // If no bookId and no chunks provided, fetch summaries from all books for general context
     else if (!chunks.length && !bookId) {
       console.log('Fetching summaries from all books for general chat');
       
-      // Get all books with summaries
-      const { data: booksData, error: booksError } = await supabaseClient
-        .from('books')
-        .select('id, title, author, summary')
-        .filter('summary', 'not.is', null);
-        
-      if (booksError) {
-        console.error('Error fetching books:', booksError);
-      } else if (booksData && booksData.length > 0) {
-        for (const book of booksData) {
-          chunks.push({
-            title: book.title,
-            author: book.author,
-            text: book.summary || '',
-            summary: book.summary || ''
-          });
+      try {
+        // Get all books with summaries
+        const { data: booksData, error: booksError } = await supabaseClient
+          .from('books')
+          .select('id, title, author, summary')
+          .filter('summary', 'not.is', null);
+          
+        if (booksError) {
+          console.error('Error fetching books:', booksError);
+        } else if (booksData && booksData.length > 0) {
+          console.log(`Found ${booksData.length} books with summaries`);
+          
+          for (const book of booksData) {
+            chunks.push({
+              title: book.title,
+              author: book.author,
+              text: book.summary || '',
+              summary: book.summary || ''
+            });
+          }
+        } else {
+          console.log('No books with summaries found');
         }
+      } catch (err) {
+        console.error('Error in general chat processing:', err);
+        // Continue with empty chunks rather than failing
       }
     }
 
+    console.log(`Processing ${chunks.length} chunks for context`);
     const book_citations: Record<string, string> = {};
 
     if (chunks && chunks.length > 0) {
       chunks.forEach((chunk, i) => {
+        if (!chunk.title || !chunk.author) {
+          console.warn(`Missing title or author for chunk ${i}`);
+        }
+        
         // Use the summary when available instead of full text for more concise context
         const contentToUse = chunk.summary || chunk.text;
-        context += `\nChunk ${i+1} from '${chunk.title}' by ${chunk.author}:\n${contentToUse}\n`;
-        book_citations[chunk.title] = chunk.author;
+        if (!contentToUse) {
+          console.warn(`Missing content for chunk ${i}`);
+        }
+        
+        context += `\nChunk ${i+1} from '${chunk.title || 'Unknown'}' by ${chunk.author || 'Unknown'}:\n${contentToUse || 'No content available'}\n`;
+        book_citations[chunk.title || 'Unknown'] = chunk.author || 'Unknown';
         
         // Use the first chunk's book info as the citation if not already set
         if (!bookTitle) {
@@ -171,6 +238,9 @@ Deno.serve(async (req) => {
           bookAuthor = chunk.author;
         }
       });
+    } else {
+      console.log('No chunks available for context');
+      context = "No book context available. I'll try to answer based on general knowledge.";
     }
 
     // Create prompt for Grok
@@ -182,62 +252,82 @@ Always cite the book and author when referencing information from the texts.
 If the answer cannot be found in the provided context, indicate that clearly.
 Provide a thoughtful, well-reasoned response with quotations from the book where appropriate.`;
 
+    console.log('Calling Grok API');
+    
     // Call Grok API
-    const grokResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${GROK_API_KEY}`
-      },
-      body: JSON.stringify({
-        model: 'llama-3.1-8b-instant',
-        messages: [
-          { role: 'system', content: 'You are a helpful assistant that provides insights from books.' },
-          { role: 'user', content: prompt }
-        ],
-        temperature: 0.7,
-        max_tokens: 800
-      })
-    });
-
-    if (!grokResponse.ok) {
-      const errorText = await grokResponse.text();
-      throw new Error(`Grok API error: ${grokResponse.status} - ${errorText}`);
-    }
-
-    const grokData = await grokResponse.json() as ChatCompletion;
-    const responseText = grokData.choices[0].message.content;
-
-    // Determine which book was cited
-    let citedBook = bookTitle;
-    let citedAuthor = bookAuthor;
-
-    // Save chat history to database
-    const { error: insertError } = await supabaseClient
-      .from('chat_history')
-      .insert({
-        user_id: user.id,
-        query,
-        response: responseText,
-        book: citedBook,
-        author: citedAuthor
+    try {
+      const grokResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${GROK_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: 'llama-3.1-8b-instant',
+          messages: [
+            { role: 'system', content: 'You are a helpful assistant that provides insights from books.' },
+            { role: 'user', content: prompt }
+          ],
+          temperature: 0.7,
+          max_tokens: 800
+        })
       });
 
-    if (insertError) {
-      console.error('Error saving chat history:', insertError);
-    }
-
-    // Return the response
-    return new Response(
-      JSON.stringify({
-        response: responseText,
-        book: citedBook,
-        author: citedAuthor
-      }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      if (!grokResponse.ok) {
+        const errorText = await grokResponse.text();
+        console.error(`Grok API error: ${grokResponse.status} - ${errorText}`);
+        throw new Error(`Grok API error: ${grokResponse.status} - ${errorText}`);
       }
-    );
+
+      const grokData = await grokResponse.json() as ChatCompletion;
+      const responseText = grokData.choices[0].message.content;
+      console.log('Got response from Grok API');
+
+      // Determine which book was cited
+      let citedBook = bookTitle;
+      let citedAuthor = bookAuthor;
+
+      // Save chat history to database
+      try {
+        const { error: insertError } = await supabaseClient
+          .from('chat_history')
+          .insert({
+            user_id: user.id,
+            query,
+            response: responseText,
+            book: citedBook,
+            author: citedAuthor
+          });
+
+        if (insertError) {
+          console.error('Error saving chat history:', insertError);
+        }
+      } catch (err) {
+        console.error('Error in chat history insertion:', err);
+        // Continue rather than failing if chat history can't be saved
+      }
+
+      // Return the response
+      return new Response(
+        JSON.stringify({
+          response: responseText,
+          book: citedBook,
+          author: citedAuthor
+        }),
+        {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    } catch (grokError) {
+      console.error('Grok API error:', grokError);
+      return new Response(
+        JSON.stringify({ error: `Error calling AI service: ${grokError.message}` }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
   } catch (error) {
     console.error('Error processing request:', error);
     return new Response(

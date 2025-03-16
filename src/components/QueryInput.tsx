@@ -9,19 +9,26 @@ import { Textarea } from '@/components/ui/textarea';
 interface QueryInputProps {
   onSubmit: (query: string) => void;
   isLoading: boolean;
+  suggestions?: string[];
 }
 
-const QueryInput: React.FC<QueryInputProps> = ({ onSubmit, isLoading }) => {
+const QueryInput: React.FC<QueryInputProps> = ({ 
+  onSubmit, 
+  isLoading, 
+  suggestions = [] 
+}) => {
   const [query, setQuery] = useState<string>('');
-  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [activeSuggestions, setActiveSuggestions] = useState<string[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    // Populate with some sample queries on initial load
-    if (!suggestions.length) {
-      setSuggestions(sampleUserQueries);
+    // Use provided suggestions or fall back to sample queries
+    if (suggestions.length > 0) {
+      setActiveSuggestions(suggestions);
+    } else if (!activeSuggestions.length) {
+      setActiveSuggestions(sampleUserQueries);
     }
-  }, [suggestions.length]);
+  }, [suggestions, activeSuggestions.length]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,14 +47,13 @@ const QueryInput: React.FC<QueryInputProps> = ({ onSubmit, isLoading }) => {
   const handleSuggestionClick = (suggestion: string) => {
     onSubmit(suggestion);
     setQuery('');
-    setSuggestions([]);
   };
 
   return (
     <div className="w-full max-w-2xl mx-auto">
-      {!isLoading && suggestions.length > 0 && (
+      {!isLoading && activeSuggestions.length > 0 && (
         <div className="mb-4 flex flex-wrap gap-2 animate-fade-in">
-          {suggestions.map((suggestion, index) => (
+          {activeSuggestions.map((suggestion, index) => (
             <Button
               key={index}
               variant="outline"

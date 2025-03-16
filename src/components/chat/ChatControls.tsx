@@ -1,16 +1,25 @@
 
-import React from 'react';
-import QueryInput from '../QueryInput';
+import React, { useState } from 'react';
+import QueryInput from '@/components/QueryInput';
 
 interface ChatControlsProps {
   onSubmit: (query: string) => void;
   isLoading: boolean;
+  suggestions?: string[];
 }
 
-const ChatControls: React.FC<ChatControlsProps> = ({ onSubmit, isLoading }) => {
+const ChatControls: React.FC<ChatControlsProps> = ({ 
+  onSubmit, 
+  isLoading,
+  suggestions = []
+}) => {
   return (
-    <div className="p-4 border-t border-border/40 bg-background glass-effect">
-      <QueryInput onSubmit={onSubmit} isLoading={isLoading} />
+    <div className="mt-4 px-4 py-4 border-t border-border/50 bg-background/95 backdrop-blur-sm">
+      <QueryInput 
+        onSubmit={onSubmit} 
+        isLoading={isLoading} 
+        suggestions={suggestions}
+      />
     </div>
   );
 };

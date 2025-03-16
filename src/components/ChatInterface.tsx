@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Upload } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { fetchUserBooks } from '@/services/api';
+import { useToast } from "@/components/ui/use-toast";
 
 interface ChatInterfaceProps {
   selectedBookId?: string | null;
@@ -20,15 +21,36 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedBookId }) => {
   const [showBookSelector, setShowBookSelector] = useState<boolean>(false);
   const [showBookUpload, setShowBookUpload] = useState<boolean>(false);
   const [selectedBook, setSelectedBook] = useState<Book | null>(null);
+  const [bookSuggestions, setBookSuggestions] = useState<string[]>([]);
   const navigate = useNavigate();
+  const { toast } = useToast();
   
   const {
     messages,
     isLoading,
     chatMode,
     setChatMode,
-    handleSubmit
+    handleSubmit,
+    error
   } = useChat(selectedBook?.title || null, selectedBookId);
+
+  useEffect(() => {
+    if (selectedBookId && selectedBook) {
+      setBookSuggestions([
+        `What is the main idea of ${selectedBook.title}?`,
+        `Tell me about ${selectedBook.title} by ${selectedBook.author}`,
+        `Summarize ${selectedBook.title}`,
+        `What can I learn from ${selectedBook.title}?`
+      ]);
+    } else {
+      setBookSuggestions([
+        "What books do I have?",
+        "Summarize all my books",
+        "Which book should I read first?",
+        "Compare the books in my library"
+      ]);
+    }
+  }, [selectedBookId, selectedBook]);
 
   const handleSelectBookClick = () => {
     setShowBookSelector(true);
@@ -42,23 +64,39 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedBookId }) => {
     setSelectedBook(book);
     setShowBookSelector(false);
     
-    // Redirect to chat with the selected book
     navigate(`/chat/${book.id}`);
   };
 
   const handleUploadComplete = (success: boolean, message: string, bookId?: string) => {
     if (success && bookId) {
-      // Close the upload dialog after a delay to show the success message
+      toast({
+        title: "Book uploaded",
+        description: message,
+      });
+      
       setTimeout(() => {
         setShowBookUpload(false);
-        // Navigate to chat with the newly uploaded book
         navigate(`/chat/${bookId}`);
       }, 2000);
+    } else if (!success) {
+      toast({
+        variant: "destructive",
+        title: "Upload failed",
+        description: message,
+      });
     }
-    // Keep dialog open on failure so user can try again
   };
 
-  // Load book data if a book ID is provided
+  useEffect(() => {
+    if (error) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error,
+      });
+    }
+  }, [error, toast]);
+
   useEffect(() => {
     const loadBookData = async () => {
       if (selectedBookId) {
@@ -68,15 +106,27 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedBookId }) => {
           const book = books.find(b => b.id === selectedBookId);
           if (book) {
             setSelectedBook(book);
+          } else {
+            console.warn('Book not found in user books:', selectedBookId);
+            toast({
+              variant: "destructive",
+              title: "Book not found",
+              description: "The selected book couldn't be found in your library.",
+            });
           }
         } catch (error) {
           console.error('Error loading book data:', error);
+          toast({
+            variant: "destructive",
+            title: "Error loading book",
+            description: "There was a problem loading the book data.",
+          });
         }
       }
     };
 
     loadBookData();
-  }, [selectedBookId]);
+  }, [selectedBookId, toast]);
 
   return (
     <div className="flex flex-col h-full">
@@ -117,7 +167,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedBookId }) => {
             </div>
           </div>
           <ChatMessages messages={messages} />
-          <ChatControls onSubmit={handleSubmit} isLoading={isLoading} />
+          <ChatControls 
+            onSubmit={handleSubmit} 
+            isLoading={isLoading} 
+            suggestions={bookSuggestions}
+          />
         </>
       )}
 

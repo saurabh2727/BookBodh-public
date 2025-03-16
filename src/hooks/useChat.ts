@@ -21,6 +21,7 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
   const [isLoading, setIsLoading] = useState(false);
   const [chatMode, setChatMode] = useState<ChatMode>('general');
   const [bookChunks, setBookChunks] = useState<any[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   // Fetch book chunks when a book ID is selected
   useEffect(() => {
@@ -28,13 +29,26 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
       if (selectedBookId) {
         try {
           console.log('Fetching book chunks for:', selectedBookId);
+          setError(null);
           const chunks = await fetchBookChunks(selectedBookId);
-          setBookChunks(chunks);
+          
+          if (!chunks || chunks.length === 0) {
+            console.warn('No chunks found for book ID:', selectedBookId);
+          } else {
+            console.log(`Loaded ${chunks.length} chunks for book ID: ${selectedBookId}`);
+          }
+          
+          setBookChunks(chunks || []);
           // When chunks are loaded, set mode to specific-book
           setChatMode('specific-book');
         } catch (error) {
           console.error('Error loading book chunks:', error);
+          setError('Failed to load book data. Please try again later.');
         }
+      } else {
+        // Reset to general mode if no book ID
+        setChatMode('general');
+        setBookChunks([]);
       }
     };
 
@@ -43,6 +57,9 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
 
   const handleSubmit = async (query: string) => {
     if (!query.trim() || isLoading) return;
+
+    // Reset any previous errors
+    setError(null);
 
     // Add user message
     const userMessage: ChatMessage = {
@@ -75,15 +92,21 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
         bookId: selectedBookId,
         chunks: chatMode === 'specific-book' && bookChunks.length > 0 
           ? bookChunks.map(chunk => ({
-              title: chunk.title,
-              author: selectedBook || 'Unknown',
-              text: chunk.text,
-              summary: chunk.summary
+              title: chunk.title || selectedBook || 'Unknown',
+              author: chunk.author || 'Unknown',
+              text: chunk.text || '',
+              summary: chunk.summary || chunk.text?.substring(0, 200) || ''
             }))
           : undefined
       };
 
-      console.log('Sending chat request with payload:', requestPayload);
+      console.log('Sending chat request with payload:', {
+        query: requestPayload.query,
+        book: requestPayload.book,
+        bookId: requestPayload.bookId,
+        chunksCount: requestPayload.chunks?.length
+      });
+      
       const response = await sendChatRequest(requestPayload);
 
       // Replace loading message with response
@@ -111,19 +134,25 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
     } catch (error) {
       console.error('Error sending chat request:', error);
       
+      const errorMessage = error instanceof Error 
+        ? error.message
+        : "I'm sorry, I couldn't process your request. Please try again later.";
+      
       // Replace loading message with error message
       setMessages((prev) =>
         prev.map((msg) =>
           msg.id === loadingMessageId
             ? {
                 id: loadingMessageId,
-                content: "I'm sorry, I couldn't process your request. Please try again later.",
+                content: errorMessage,
                 type: 'bot',
                 timestamp: new Date(),
               }
             : msg
         )
       );
+      
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -135,6 +164,7 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
     chatMode,
     setChatMode,
     handleSubmit,
+    error
   };
 };
 
