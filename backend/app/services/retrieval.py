@@ -2,6 +2,11 @@
 from app.database.books import BookDatabase
 from app.database.embeddings import EmbeddingStore
 from typing import List, Dict, Optional
+import logging
+
+# Configure logger
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Initialize database and embedding store
 book_db = BookDatabase()
@@ -20,19 +25,33 @@ def retrieve_chunks(query: str, book: Optional[str] = None, book_id: Optional[st
         List of dictionaries containing text chunks and metadata
     """
     # Print debug information
-    print(f"Retrieving chunks for query: {query}, book: {book}, book_id: {book_id}")
+    logger.info(f"Retrieving chunks for query: {query}, book: {book}, book_id: {book_id}")
     
     chunks = []
     
     # If book_id is provided, get all chunks for that book
     if book_id:
         # Log that we're using book_id for retrieval
-        print(f"Using book_id {book_id} for retrieval")
+        logger.info(f"Using book_id {book_id} for retrieval")
+        
+        # Get all books and their IDs for debugging
+        all_books = book_db.get_books()
+        logger.info(f"Available books in database: {len(all_books)}")
+        for b in all_books:
+            logger.info(f"Book: {b.get('title', 'Unknown')}, ID: {b.get('id', 'None')}")
         
         # Get all chunks for this book from the database
         book_chunks = book_db.get_chunks_by_book_id(book_id)
         
         if book_chunks:
+            logger.info(f"Found {len(book_chunks)} chunks for book_id {book_id}")
+            # Sample debug of first chunk
+            if book_chunks and len(book_chunks) > 0:
+                first_chunk = book_chunks[0]
+                logger.info(f"First chunk sample: title={first_chunk.get('title', 'Unknown')}, " + 
+                          f"text_length={len(first_chunk.get('text', ''))}, " +
+                          f"book_id={first_chunk.get('book_id', 'None')}")
+            
             for chunk_data in book_chunks:
                 chunks.append({
                     "text": chunk_data["text"],
@@ -41,22 +60,34 @@ def retrieve_chunks(query: str, book: Optional[str] = None, book_id: Optional[st
                     "score": 1.0  # Direct match, so highest score
                 })
             
-            print(f"Found {len(chunks)} chunks for book_id {book_id}")
             return chunks
         else:
-            print(f"No chunks found for book_id {book_id}")
-            # Additional debug info if no chunks found with book_id
+            logger.warning(f"No chunks found for book_id {book_id}")
+            # Try to reload the database cache
             try:
-                books = book_db.get_books()
-                print(f"Available books in the database: {len(books)}")
-                for b in books:
-                    print(f"Book: {b.get('title', 'Unknown')}, ID: {b.get('id', 'None')}")
+                logger.info("Attempting to reload book database cache")
+                book_db._load_external_books()
+                
+                # Try again after reload
+                book_chunks = book_db.get_chunks_by_book_id(book_id)
+                if book_chunks:
+                    logger.info(f"Found {len(book_chunks)} chunks after reloading cache")
+                    for chunk_data in book_chunks:
+                        chunks.append({
+                            "text": chunk_data["text"],
+                            "title": chunk_data["title"],
+                            "author": chunk_data.get("author", "Unknown"),
+                            "score": 1.0
+                        })
+                    return chunks
+                else:
+                    logger.warning(f"Still no chunks found after cache reload")
             except Exception as e:
-                print(f"Error getting books list: {e}")
+                logger.error(f"Error reloading cache: {e}")
     
     # If no book_id or no chunks found with book_id, try using book title
     if book and not chunks:
-        print(f"Using book title '{book}' for retrieval")
+        logger.info(f"Using book title '{book}' for retrieval")
         
         # Get embeddings for the query
         results = embedding_store.search(query, k=3, filter_book=book)
@@ -73,11 +104,11 @@ def retrieve_chunks(query: str, book: Optional[str] = None, book_id: Optional[st
                     "score": float(score)
                 })
         
-        print(f"Found {len(chunks)} chunks using semantic search for book '{book}'")
+        logger.info(f"Found {len(chunks)} chunks using semantic search for book '{book}'")
     
     # If no book specified or no chunks found with book title, try general search
     if (not book and not book_id) or not chunks:
-        print("Using general search across all books")
+        logger.info("Using general search across all books")
         
         # Get embeddings for the query across all books
         results = embedding_store.search(query, k=3)
@@ -94,6 +125,6 @@ def retrieve_chunks(query: str, book: Optional[str] = None, book_id: Optional[st
                     "score": float(score)
                 })
         
-        print(f"Found {len(chunks)} chunks using general search")
+        logger.info(f"Found {len(chunks)} chunks using general search")
     
     return chunks
