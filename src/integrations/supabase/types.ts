@@ -52,6 +52,7 @@ export type Database = {
           file_url: string
           icon_url: string | null
           id: string
+          status: string | null
           summary: string | null
           title: string
           user_id: string
@@ -63,6 +64,7 @@ export type Database = {
           file_url: string
           icon_url?: string | null
           id?: string
+          status?: string | null
           summary?: string | null
           title: string
           user_id: string
@@ -74,6 +76,7 @@ export type Database = {
           file_url?: string
           icon_url?: string | null
           id?: string
+          status?: string | null
           summary?: string | null
           title?: string
           user_id?: string

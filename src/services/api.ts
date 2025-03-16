@@ -106,20 +106,58 @@ export const uploadBook = async (
       if (error) {
         console.error('Edge function error:', error);
         console.error('Error details:', JSON.stringify(error, null, 2));
-        throw new Error(error.message || 'Error uploading book');
+        
+        // If we have a message from the error, use it
+        if (error.message) {
+          return { 
+            success: false, 
+            message: `Error uploading book: ${error.message}` 
+          };
+        }
+        
+        return { 
+          success: false, 
+          message: 'Error uploading book. Please try again.' 
+        };
       }
 
       console.log('Upload response:', data);
+      
+      // Make sure we have a valid response
+      if (!data) {
+        return { 
+          success: false, 
+          message: 'No response from server. Please try again.' 
+        };
+      }
+      
       return data;
     } catch (invokeError) {
       console.error('Error invoking Edge Function:', invokeError);
       console.error('Error details:', JSON.stringify(invokeError, null, 2));
-      throw new Error(`Failed to send a request to the Edge Function: ${invokeError.message}`);
+      
+      // If this is a network error, provide a clear message
+      if (invokeError instanceof Error && invokeError.message.includes('NetworkError')) {
+        return { 
+          success: false, 
+          message: 'Network error. Please check your internet connection and try again.' 
+        };
+      }
+      
+      // For other errors
+      return { 
+        success: false, 
+        message: `Failed to send a request to the Edge Function: ${invokeError instanceof Error ? invokeError.message : 'Unknown error'}` 
+      };
     }
   } catch (error) {
     console.error('Book upload error:', error);
     console.error('Error details:', JSON.stringify(error, null, 2));
-    throw error;
+    
+    return { 
+      success: false, 
+      message: `Upload failed: ${error instanceof Error ? error.message : 'Unknown error'}` 
+    };
   }
 };
 

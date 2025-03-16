@@ -91,11 +91,13 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
       
       const result = await uploadBook(file, title, author, category);
       
+      console.log('Upload result:', result);
+      
       if (result.success) {
         onUploadComplete(true, result.message, result.bookId);
       } else {
-        setError(result.message);
-        onUploadComplete(false, result.message);
+        setError(result.message || 'Upload failed. Please try again.');
+        onUploadComplete(false, result.message || 'Upload failed. Please try again.');
       }
     } catch (error) {
       console.error('Error uploading book:', error);
@@ -118,6 +120,7 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
           onChange={handleFileChange} 
           accept="application/pdf,.pdf"
           className="mt-1"
+          disabled={isUploading}
         />
         {!file && <p className="text-xs text-muted-foreground mt-1">Select a PDF file to upload</p>}
         {file && <p className="text-xs text-muted-foreground mt-1">Selected: {file.name}</p>}
@@ -131,6 +134,7 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Book title"
           className="mt-1"
+          disabled={isUploading}
         />
       </div>
       
@@ -142,6 +146,7 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
           onChange={(e) => setAuthor(e.target.value)}
           placeholder="Author name"
           className="mt-1"
+          disabled={isUploading}
         />
       </div>
       
@@ -151,6 +156,7 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
           defaultValue="Non-Fiction" 
           value={category} 
           onValueChange={setCategory}
+          disabled={isUploading}
         >
           <SelectTrigger className="mt-1">
             <SelectValue placeholder="Select a category" />

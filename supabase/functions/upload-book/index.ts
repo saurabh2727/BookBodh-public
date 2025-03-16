@@ -186,8 +186,7 @@ Deno.serve(async (req) => {
               status: 'processed'
             }
           ])
-          .select()
-          .single();
+          .select();
           
         if (bookError) {
           console.error("Error inserting book into database:", bookError);
@@ -197,7 +196,7 @@ Deno.serve(async (req) => {
           );
         }
         
-        console.log("Book metadata inserted into database");
+        console.log("Book metadata inserted into database:", bookData);
         
         // Insert sample book chunks (in a real app, would create actual chunks from PDF content)
         const { error: chunkError } = await supabaseClient
