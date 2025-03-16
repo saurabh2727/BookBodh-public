@@ -15,6 +15,7 @@ export type Database = {
           chunk_index: number
           created_at: string
           id: string
+          summary: string | null
           text: string
           title: string
         }
@@ -23,6 +24,7 @@ export type Database = {
           chunk_index: number
           created_at?: string
           id?: string
+          summary?: string | null
           text: string
           title: string
         }
@@ -31,6 +33,7 @@ export type Database = {
           chunk_index?: number
           created_at?: string
           id?: string
+          summary?: string | null
           text?: string
           title?: string
         }
