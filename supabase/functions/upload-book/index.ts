@@ -101,12 +101,14 @@ const extractTextFromPDF = async (fileBuffer: Uint8Array): Promise<string> => {
     
     if (fullText.length < 500) {
       console.warn('Warning: Extracted text is very short, PDF might not contain extractable text');
+      // Provide a fallback message for non-extractable PDFs
+      return "This PDF does not contain easily extractable text. It might be scanned or image-based.";
     }
     
     return fullText;
   } catch (error) {
     console.error('Error extracting PDF text:', error);
-    return '';
+    return 'Error extracting text from PDF. The file may be corrupt or password-protected.';
   }
 };
 
@@ -294,30 +296,40 @@ serve(async (req) => {
       );
     }
 
-    // Validate file type (PDF only)
-    if (!file.filename || !file.filename.toLowerCase().endsWith('.pdf')) {
+    // Validate file type (PDF only) - FIX: Use more reliable method to check if file is PDF
+    const isPDF = file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf';
+    if (!isPDF) {
       return new Response(
         JSON.stringify({ success: false, error: 'Only PDF files are allowed' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
+    console.log(`Processing file: ${file.name} (${file.size} bytes), type: ${file.type}`);
+
     // Create a unique filename to prevent overwriting
     const uniqueFilename = `${user.id}-${Date.now()}-${file.name}`;
     const filePath = `${user.id}/${uniqueFilename}`;
     
-    console.log(`Processing file: ${file.name} (${file.size} bytes)`);
-    
     // Convert File to ArrayBuffer for upload and processing
     const arrayBuffer = await file.arrayBuffer();
     const fileBuffer = new Uint8Array(arrayBuffer);
+
+    // Check if file starts with %PDF (basic PDF validation)
+    const headerCheck = new TextDecoder().decode(fileBuffer.slice(0, 8));
+    if (!headerCheck.startsWith('%PDF')) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'Invalid PDF file format' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
     // Upload the file to Supabase Storage
     console.log('Uploading file to storage...');
     const { data: uploadData, error: uploadError } = await supabaseClient.storage
       .from('books')
       .upload(filePath, fileBuffer, {
-        contentType: file.type,
+        contentType: 'application/pdf',
         upsert: true,
       });
 

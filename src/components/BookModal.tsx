@@ -27,6 +27,17 @@ const BookModal: React.FC<BookModalProps> = ({ book, isOpen, onClose }) => {
     onClose();
   };
 
+  // Check if summary is PDF metadata and provide a readable message
+  const isPDFMetadata = book.summary && (
+    book.summary.includes('%PDF') || 
+    book.summary.includes('obj<') || 
+    book.summary.startsWith('PDF')
+  );
+
+  const displaySummary = isPDFMetadata
+    ? "This book's content could not be automatically summarized. You can still chat with it to explore its contents."
+    : book.summary;
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-md">
@@ -56,9 +67,7 @@ const BookModal: React.FC<BookModalProps> = ({ book, isOpen, onClose }) => {
         
         <div className="py-4">
           <p className="text-sm text-foreground/90 leading-relaxed">
-            {book.summary && !book.summary.startsWith('%PDF') 
-              ? book.summary 
-              : "No readable summary available for this book."}
+            {displaySummary}
           </p>
         </div>
         
