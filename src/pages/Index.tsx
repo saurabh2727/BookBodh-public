@@ -30,7 +30,7 @@ const Index = () => {
           </TabsContent>
           
           <TabsContent value="chat" className="h-[calc(100vh-16rem)]">
-            <ChatInterface selectedBook={selectedBook} />
+            <ChatInterface selectedBookId={selectedBook} />
           </TabsContent>
         </Tabs>
       </main>
