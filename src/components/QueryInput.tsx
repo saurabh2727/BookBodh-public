@@ -18,6 +18,8 @@ interface QueryInputProps {
   suggestions?: string[];
   disabled?: boolean;
   placeholderText?: string;
+  value?: string;
+  onChange?: (value: string) => void;
 }
 
 const QueryInput: React.FC<QueryInputProps> = ({ 
@@ -25,11 +27,17 @@ const QueryInput: React.FC<QueryInputProps> = ({
   isLoading = false,
   suggestions = [],
   disabled = false,
-  placeholderText = "Ask a question..."
+  placeholderText = "Ask a question...",
+  value,
+  onChange
 }) => {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Use controlled input if value prop is provided
+  const isControlled = value !== undefined && onChange !== undefined;
+  const currentValue = isControlled ? value : query;
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -45,16 +53,32 @@ const QueryInput: React.FC<QueryInputProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!query.trim() || isLoading || disabled) return;
+    if (!currentValue.trim() || isLoading || disabled) return;
     
-    onSubmit(query.trim());
-    setQuery('');
+    onSubmit(currentValue.trim());
+    if (!isControlled) {
+      setQuery('');
+    } else if (onChange) {
+      onChange('');
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newValue = e.target.value;
+    if (isControlled && onChange) {
+      onChange(newValue);
+    } else {
+      setQuery(newValue);
+    }
   };
 
   const handleSuggestionSelect = (suggestion: string) => {
     if (disabled) return;
     
     setOpen(false);
+    if (isControlled && onChange) {
+      onChange(suggestion);
+    }
     onSubmit(suggestion);
   };
 
@@ -63,8 +87,8 @@ const QueryInput: React.FC<QueryInputProps> = ({
       <div className="relative flex-1">
         <Input
           ref={inputRef}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          value={currentValue}
+          onChange={handleInputChange}
           placeholder={placeholderText}
           className="w-full pr-10"
           disabled={isLoading || disabled}
@@ -85,7 +109,7 @@ const QueryInput: React.FC<QueryInputProps> = ({
       <Button 
         type="submit" 
         size="icon" 
-        disabled={!query.trim() || isLoading || disabled}
+        disabled={!currentValue.trim() || isLoading || disabled}
         className={isLoading ? 'opacity-70' : ''}
       >
         <Send className="h-4 w-4" />
