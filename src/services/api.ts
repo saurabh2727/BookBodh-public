@@ -1,38 +1,75 @@
 
 import { ChatRequest, ChatResponse } from '../types';
-
-const API_BASE_URL = 'http://localhost:8000';
+import { supabase } from '../lib/supabase';
 
 /**
- * Sends a chat request to the backend
+ * Sends a chat request to the Supabase Edge Function
  * @param request The chat request with query and optional book
  * @returns Promise with the chat response
  */
 export const sendChatRequest = async (request: ChatRequest): Promise<ChatResponse> => {
   try {
-    console.log('Sending chat request to:', `${API_BASE_URL}/chat`);
+    console.log('Sending chat request to Supabase Edge Function');
     console.log('Request payload:', JSON.stringify(request));
     
-    const response = await fetch(`${API_BASE_URL}/chat`, {
+    // Get the current session
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    if (!session) {
+      throw new Error('User not authenticated');
+    }
+    
+    const { data, error } = await supabase.functions.invoke('chat-response', {
       method: 'POST',
+      body: request,
       headers: {
-        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.access_token}`,
       },
-      body: JSON.stringify(request),
-      credentials: 'include', // Include cookies if needed
     });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ detail: 'Failed to parse error response' }));
-      console.error('Server response error:', response.status, errorData);
-      throw new Error(errorData.detail || `Server returned ${response.status}: ${response.statusText}`);
+    if (error) {
+      console.error('Edge function error:', error);
+      throw new Error(error.message || 'Error calling chat response function');
     }
 
-    const data = await response.json();
     console.log('Server response:', data);
-    return data;
+    return data as ChatResponse;
   } catch (error) {
     console.error('Chat request error:', error);
     throw error;
   }
+};
+
+/**
+ * Checks if the user is authenticated
+ * @returns Promise with the session data
+ */
+export const checkAuth = async () => {
+  const { data: { session } } = await supabase.auth.getSession();
+  return session;
+};
+
+/**
+ * Signs in with email and password
+ * @param email User email
+ * @param password User password
+ */
+export const signInWithEmail = async (email: string, password: string) => {
+  return supabase.auth.signInWithPassword({ email, password });
+};
+
+/**
+ * Signs up with email and password
+ * @param email User email
+ * @param password User password
+ */
+export const signUpWithEmail = async (email: string, password: string) => {
+  return supabase.auth.signUp({ email, password });
+};
+
+/**
+ * Signs out the current user
+ */
+export const signOut = async () => {
+  return supabase.auth.signOut();
 };
