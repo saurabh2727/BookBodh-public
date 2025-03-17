@@ -1,4 +1,3 @@
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.38.4";
 import { corsHeaders } from "../_shared/cors.ts";
@@ -213,6 +212,7 @@ serve(async (req) => {
     const authHeader = req.headers.get("Authorization");
     
     if (!authHeader) {
+      console.log("Missing Authorization header");
       return new Response(
         JSON.stringify({
           error: "Missing Authorization header",
@@ -230,19 +230,56 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_ANON_KEY") ?? "",
       {
         global: { headers: { Authorization: authHeader } },
-        auth: { persistSession: false },
+        auth: { 
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false
+        },
       }
     );
     
     // Get the authenticated user from JWT
-    const { data: { user: jwtUser }, error: authError } = await supabaseClient.auth.getUser();
-    
-    if (authError || !jwtUser) {
-      console.error("Authentication error:", authError);
+    let jwtUser;
+    try {
+      const { data, error } = await supabaseClient.auth.getUser();
+      
+      if (error) {
+        console.error("Authentication error:", error);
+        return new Response(
+          JSON.stringify({
+            error: "Authentication failed",
+            details: error.message,
+            code: error.code
+          }),
+          {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
+      
+      if (!data.user) {
+        console.error("No user found in JWT");
+        return new Response(
+          JSON.stringify({
+            error: "Authentication failed",
+            details: "User not found in JWT"
+          }),
+          {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
+      
+      jwtUser = data.user;
+      console.log("JWT user ID:", jwtUser.id);
+    } catch (authError) {
+      console.error("Error getting user from JWT:", authError);
       return new Response(
         JSON.stringify({
-          error: "Authentication failed",
-          details: authError?.message || "User not found in JWT",
+          error: "Authentication error",
+          details: authError instanceof Error ? authError.message : "Unknown error"
         }),
         {
           status: 401,
@@ -250,8 +287,6 @@ serve(async (req) => {
         }
       );
     }
-    
-    console.log("JWT user ID:", jwtUser.id);
     
     // Parse the multipart form data
     const formData = await req.formData();
@@ -454,7 +489,8 @@ serve(async (req) => {
     
     return new Response(
       JSON.stringify({ 
-        error: `Unexpected error: ${error.message}` 
+        error: `Unexpected error: ${error instanceof Error ? error.message : String(error)}`,
+        stack: error instanceof Error ? error.stack : undefined
       }),
       {
         status: 500,

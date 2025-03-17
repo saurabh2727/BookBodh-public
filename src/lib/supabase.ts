@@ -13,6 +13,16 @@ if (!supabaseUrl || !supabaseAnonKey) {
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: true,
-    autoRefreshToken: true
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+    storage: localStorage
   }
 });
+
+// Export a function to get auth header for edge functions
+export const getAuthHeader = async () => {
+  const session = await supabase.auth.getSession();
+  return session?.data?.session?.access_token 
+    ? `Bearer ${session.data.session.access_token}` 
+    : undefined;
+};
