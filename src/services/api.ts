@@ -1,5 +1,6 @@
+
 import { ChatRequest, ChatResponse, Book } from '../types';
-import { supabase, getAuthHeader } from '@/lib/supabase';
+import { supabase, getAuthHeader, ensureAuthIsValid } from '@/lib/supabase';
 
 /**
  * Sends a chat request to the Supabase Edge Function
@@ -10,6 +11,9 @@ export const sendChatRequest = async (request: ChatRequest): Promise<ChatRespons
   try {
     console.log('Sending chat request to Supabase Edge Function');
     console.log('Request payload:', JSON.stringify(request));
+    
+    // Ensure auth is valid before proceeding
+    await ensureAuthIsValid();
     
     // Get the auth header
     const authHeader = await getAuthHeader();
@@ -78,6 +82,15 @@ export const uploadBook = async (
         success: false, 
         message: `File is too large (${Math.round(file.size/1024/1024)}MB). Maximum allowed size is 10MB.` 
       };
+    }
+    
+    // Ensure auth is valid before proceeding
+    const isAuthValid = await ensureAuthIsValid();
+    if (!isAuthValid) {
+      console.error('Auth validation failed, attempting to refresh session...');
+      // Try to sign in again with the stored credentials if available
+      // This is a simplified approach - in a real app you might want to prompt the user
+      await supabase.auth.refreshSession();
     }
     
     // Get the auth header using the exported function from lib/supabase

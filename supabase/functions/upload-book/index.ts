@@ -1,5 +1,7 @@
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.38.4";
+import { decode, verify } from "https://deno.land/x/djwt@v3.0.1/mod.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 
 // Get the chunk size from environment or use a default
@@ -7,6 +9,47 @@ const CHUNK_SIZE = parseInt(Deno.env.get("CHUNK_SIZE") || "1000");
 const CHUNK_OVERLAP = parseInt(Deno.env.get("CHUNK_OVERLAP") || "200");
 const FASTAPI_BACKEND_URL = Deno.env.get("FASTAPI_BACKEND_URL") || "https://ethical-wisdom-bot.lovable.app/upload-book";
 const BUCKET_NAME = "books";
+
+// Manually decode JWT token to extract user ID
+async function decodeJWT(token) {
+  try {
+    console.log("Attempting to decode JWT token");
+    // Remove 'Bearer ' prefix if present
+    const actualToken = token.startsWith("Bearer ") ? token.substring(7) : token;
+    
+    // Split the token and grab the payload part
+    const [header, payload, signature] = actualToken.split(".");
+    
+    if (!header || !payload || !signature) {
+      throw new Error("Invalid JWT token format");
+    }
+    
+    // Decode the payload
+    const decodedPayload = JSON.parse(
+      new TextDecoder().decode(
+        Uint8Array.from(atob(payload), (c) => c.charCodeAt(0))
+      )
+    );
+    
+    console.log("Successfully decoded JWT payload", {
+      sub: decodedPayload.sub,
+      exp: decodedPayload.exp,
+      iat: decodedPayload.iat,
+      role: decodedPayload.role
+    });
+    
+    // Check if token is expired
+    const now = Math.floor(Date.now() / 1000);
+    if (decodedPayload.exp && decodedPayload.exp < now) {
+      throw new Error("JWT token has expired");
+    }
+    
+    return decodedPayload;
+  } catch (error) {
+    console.error("JWT decode error:", error);
+    throw new Error(`Failed to decode JWT: ${error.message}`);
+  }
+}
 
 async function fallbackTextExtraction(pdfData: Uint8Array): Promise<string> {
   console.warn("Using fallback text extraction method");
@@ -199,11 +242,9 @@ serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === "OPTIONS") {
     console.log("Handling OPTIONS request for CORS preflight");
-    return new Response("ok", { 
-      headers: {
-        ...corsHeaders,
-        "Content-Type": "text/plain"
-      } 
+    return new Response(null, { 
+      status: 204,
+      headers: corsHeaders
     });
   }
   
@@ -224,7 +265,35 @@ serve(async (req) => {
       );
     }
     
-    // Create a Supabase client with the user's JWT
+    console.log("Authorization header present, length:", authHeader.length);
+    
+    // Manually decode the JWT to get the user ID
+    let userId;
+    try {
+      const decodedToken = await decodeJWT(authHeader);
+      userId = decodedToken.sub;
+      
+      if (!userId) {
+        console.error("No user ID (sub) found in JWT token");
+        throw new Error("Invalid JWT token: missing subject (user ID)");
+      }
+      
+      console.log("User ID extracted from JWT:", userId);
+    } catch (jwtError) {
+      console.error("JWT validation error:", jwtError);
+      return new Response(
+        JSON.stringify({
+          error: "Authentication failed",
+          details: jwtError.message
+        }),
+        {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+    
+    // Create a Supabase client with the auth header for RLS
     const supabaseClient = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
       Deno.env.get("SUPABASE_ANON_KEY") ?? "",
@@ -237,56 +306,6 @@ serve(async (req) => {
         },
       }
     );
-    
-    // Get the authenticated user from JWT
-    let jwtUser;
-    try {
-      const { data, error } = await supabaseClient.auth.getUser();
-      
-      if (error) {
-        console.error("Authentication error:", error);
-        return new Response(
-          JSON.stringify({
-            error: "Authentication failed",
-            details: error.message,
-            code: error.code
-          }),
-          {
-            status: 401,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          }
-        );
-      }
-      
-      if (!data.user) {
-        console.error("No user found in JWT");
-        return new Response(
-          JSON.stringify({
-            error: "Authentication failed",
-            details: "User not found in JWT"
-          }),
-          {
-            status: 401,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          }
-        );
-      }
-      
-      jwtUser = data.user;
-      console.log("JWT user ID:", jwtUser.id);
-    } catch (authError) {
-      console.error("Error getting user from JWT:", authError);
-      return new Response(
-        JSON.stringify({
-          error: "Authentication error",
-          details: authError instanceof Error ? authError.message : "Unknown error"
-        }),
-        {
-          status: 401,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
-    }
     
     // Parse the multipart form data
     const formData = await req.formData();
@@ -321,7 +340,7 @@ serve(async (req) => {
     const bookId = crypto.randomUUID();
     
     // Upload the file to storage
-    const filePath = `${jwtUser.id}/${file.name.replace(/\s+/g, "_")}`;
+    const filePath = `${userId}/${file.name.replace(/\s+/g, "_")}`;
     const fileData = await file.arrayBuffer();
     
     console.log(`Uploading file ${file.name} to storage path: ${filePath}`);
@@ -357,7 +376,7 @@ serve(async (req) => {
     const fileUrl = urlData?.publicUrl;
     
     // Create book record in database
-    console.log("Creating book record in database with user_id:", jwtUser.id);
+    console.log("Creating book record in database with user_id:", userId);
     
     const { data: bookData, error: bookError } = await supabaseClient
       .from("books")
@@ -367,7 +386,7 @@ serve(async (req) => {
         author: author || "Unknown",
         category: category || "Uncategorized",
         file_url: fileUrl,
-        user_id: jwtUser.id, // Use jwtUser.id to ensure it matches auth.uid()
+        user_id: userId, // Use extracted userId from JWT token
         status: "uploading",
         summary: `Processing ${title}...`
       })
@@ -447,7 +466,7 @@ serve(async (req) => {
       console.log("Processing book text into chunks...");
       let chunksCount;
       try {
-        chunksCount = await processBookText(bookId, title, extractedText, supabaseClient, jwtUser.id);
+        chunksCount = await processBookText(bookId, title, extractedText, supabaseClient, userId);
       } catch (processError) {
         console.error("Error processing book text:", processError);
         

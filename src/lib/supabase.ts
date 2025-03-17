@@ -19,10 +19,73 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   }
 });
 
-// Export a function to get auth header for edge functions
+// Enhanced getAuthHeader function with better logging
 export const getAuthHeader = async () => {
-  const session = await supabase.auth.getSession();
-  return session?.data?.session?.access_token 
-    ? `Bearer ${session.data.session.access_token}` 
-    : undefined;
+  try {
+    console.log('Getting auth header from session...');
+    const { data, error } = await supabase.auth.getSession();
+    
+    if (error) {
+      console.error('Error getting session:', error);
+      return undefined;
+    }
+    
+    if (!data.session) {
+      console.warn('No active session found');
+      return undefined;
+    }
+    
+    const token = data.session.access_token;
+    
+    if (!token) {
+      console.error('Session exists but no access token found');
+      return undefined;
+    }
+    
+    // Log token details (partial for security)
+    console.log('Access token obtained:', {
+      length: token.length,
+      prefix: token.substring(0, 10) + '...',
+      expires: new Date(data.session.expires_at * 1000).toLocaleString()
+    });
+    
+    return `Bearer ${token}`;
+  } catch (error) {
+    console.error('Unexpected error in getAuthHeader:', error);
+    return undefined;
+  }
+};
+
+// Add a function to check and refresh auth if needed
+export const ensureAuthIsValid = async () => {
+  try {
+    const { data } = await supabase.auth.getSession();
+    
+    if (!data.session) {
+      console.warn('No active session in ensureAuthIsValid');
+      return false;
+    }
+    
+    // Check if token is about to expire (within 5 minutes)
+    const expiresAt = data.session.expires_at;
+    const nowInSeconds = Math.floor(Date.now() / 1000);
+    const fiveMinutesInSeconds = 5 * 60;
+    
+    if (expiresAt - nowInSeconds < fiveMinutesInSeconds) {
+      console.log('Token is about to expire, refreshing...');
+      const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+      
+      if (refreshError) {
+        console.error('Error refreshing session:', refreshError);
+        return false;
+      }
+      
+      console.log('Session refreshed successfully');
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('Error in ensureAuthIsValid:', error);
+    return false;
+  }
 };
