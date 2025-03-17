@@ -1,7 +1,6 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.38.4";
-import pdfParse from "https://esm.sh/pdf-parse@1.1.1";
 import { corsHeaders } from "../_shared/cors.ts";
 
 // Get the chunk size from environment or use a default
@@ -9,26 +8,6 @@ const CHUNK_SIZE = parseInt(Deno.env.get("CHUNK_SIZE") || "1000");
 const CHUNK_OVERLAP = parseInt(Deno.env.get("CHUNK_OVERLAP") || "200");
 const FASTAPI_BACKEND_URL = Deno.env.get("FASTAPI_BACKEND_URL") || "https://ethical-wisdom-bot.lovable.app/upload-book";
 const BUCKET_NAME = "books";
-
-async function extractTextFromPDF(pdfData: Uint8Array): Promise<string> {
-  try {
-    console.log("Attempting to extract text using pdf-parse...");
-    // Use pdfParse as a function directly, not as a named export
-    const result = await pdfParse(pdfData);
-    const text = result.text.trim();
-    
-    console.log(`Extracted ${text.length} characters of text`);
-    
-    if (!text || text.length < 100) {
-      throw new Error("Extracted text is too short or empty");
-    }
-    
-    return text;
-  } catch (error) {
-    console.error("PDF extraction error:", error.message);
-    throw error;
-  }
-}
 
 async function fallbackTextExtraction(pdfData: Uint8Array): Promise<string> {
   console.warn("Using fallback text extraction method");
@@ -74,23 +53,7 @@ function isTextExtractedSuccessfully(text: string): boolean {
   return true;
 }
 
-async function extractTextWithFastAPIFallback(fileData: ArrayBuffer, fileName: string): Promise<string> {
-  // First try with pdf-parse
-  try {
-    const pdfData = new Uint8Array(fileData);
-    const extractedText = await extractTextFromPDF(pdfData);
-    
-    if (isTextExtractedSuccessfully(extractedText)) {
-      console.log("Successfully extracted text with pdf-parse");
-      return extractedText;
-    }
-    
-    console.warn("Text extraction with pdf-parse produced low-quality results, falling back to FastAPI");
-  } catch (error) {
-    console.warn("Text extraction with pdf-parse failed, falling back to FastAPI:", error.message);
-  }
-  
-  // Try with FastAPI backend
+async function extractTextWithFastAPI(fileData: ArrayBuffer, fileName: string): Promise<string> {
   try {
     console.log("Attempting to extract text using FastAPI backend...");
     
@@ -121,16 +84,16 @@ async function extractTextWithFastAPIFallback(fileData: ArrayBuffer, fileName: s
     console.warn("FastAPI text extraction failed or produced low-quality results");
     throw new Error("FastAPI text extraction failed to produce usable text");
   } catch (error) {
-    console.warn("FastAPI fallback failed:", error.message);
-  }
-  
-  // Last resort fallback
-  try {
-    console.warn("Falling back to manual extraction");
-    return await fallbackTextExtraction(new Uint8Array(fileData));
-  } catch (error) {
-    console.error("All text extraction methods failed");
-    throw new Error("Failed to extract text from PDF using all available methods");
+    console.warn("FastAPI extraction failed:", error.message);
+    
+    // Try fallback method
+    try {
+      console.warn("Falling back to manual extraction");
+      return await fallbackTextExtraction(new Uint8Array(fileData));
+    } catch (fallbackError) {
+      console.error("All text extraction methods failed");
+      throw new Error("Failed to extract text from PDF using all available methods");
+    }
   }
 }
 
@@ -405,7 +368,8 @@ serve(async (req) => {
     console.log("Extracting text from PDF...");
     let extractedText;
     try {
-      extractedText = await extractTextWithFastAPIFallback(fileData, file.name);
+      // Use the FastAPI backend for text extraction
+      extractedText = await extractTextWithFastAPI(fileData, file.name);
       
       if (!extractedText || extractedText.length < 100) {
         throw new Error("Failed to extract meaningful text from the PDF");
