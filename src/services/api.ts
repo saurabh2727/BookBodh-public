@@ -1,6 +1,5 @@
-
 import { ChatRequest, ChatResponse, Book } from '../types';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabase';
 
 /**
  * Sends a chat request to the Supabase Edge Function
@@ -127,93 +126,39 @@ export const uploadBook = async (
     });
     
     try {
-      // Try direct upload to database instead of using edge function
-      // First, upload the file to storage
-      console.log('Uploading file to Supabase Storage');
+      // Call the Edge Function to handle processing
+      const { data, error: invokeError } = await supabase.functions.invoke('upload-book', {
+        body: formData,
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session.access_token}`
+        }
+      });
       
-      // Create books bucket if it doesn't exist
-      const { data: bucketData, error: bucketError } = await supabase
-        .storage
-        .createBucket('books', {
-          public: false,
-          fileSizeLimit: 50 * 1024 * 1024, // 50MB limit
-        });
-      
-      if (bucketError && !bucketError.message.includes('already exists')) {
-        console.error('Bucket creation error:', bucketError);
-        // Continue anyway as the bucket might already exist
-      } else {
-        console.log('Bucket created or already exists');
-      }
-      
-      // Generate a unique ID for the book
-      const bookId = crypto.randomUUID();
-      const filePath = `${bookId}/${file.name.replace(/\s+/g, '_')}`;
-      
-      // Upload the file to storage
-      const { data: fileData, error: fileError } = await supabase
-        .storage
-        .from('books')
-        .upload(filePath, file, {
-          cacheControl: '3600',
-          upsert: false
-        });
-      
-      if (fileError) {
-        console.error('File upload error:', fileError);
-        return { 
-          success: false, 
-          message: `Error uploading file: ${fileError.message}` 
+      if (invokeError) {
+        console.error('Edge Function invoke error:', invokeError);
+        return {
+          success: false,
+          message: `Upload error: ${invokeError.message || 'Unknown edge function error'}`
         };
       }
       
-      console.log('File uploaded successfully:', fileData);
+      console.log('Edge Function response:', data);
       
-      // Get the public URL for the file
-      const { data: urlData } = await supabase
-        .storage
-        .from('books')
-        .getPublicUrl(filePath);
-      
-      const fileUrl = urlData?.publicUrl;
-      console.log('File public URL:', fileUrl);
-      
-      // Create book record in database
-      const { data: bookData, error: bookError } = await supabase
-        .from('books')
-        .insert([
-          {
-            id: bookId,
-            title,
-            author,
-            category,
-            file_url: fileUrl,
-            user_id: userId, // Add the user ID here
-            status: 'uploaded',
-            summary: `Processing ${title} by ${author}...`
-          }
-        ])
-        .select();
-      
-      if (bookError) {
-        console.error('Database insert error:', bookError);
-        return { 
-          success: false, 
-          message: `Error saving book metadata: ${bookError.message}` 
+      if (!data.success) {
+        return {
+          success: false,
+          message: data.error || 'Upload failed on server'
         };
       }
       
-      console.log('Book metadata saved:', bookData);
-      
-      // Try processing the book with the edge function later (async)
-      console.log('Book uploaded successfully, will be processed later');
       return {
         success: true,
-        message: `Book "${title}" uploaded successfully`,
-        bookId,
-        fileUrl
+        message: data.message || `Book "${title}" uploaded successfully`,
+        bookId: data.bookId,
+        chunksCount: data.chunksCount,
+        fileUrl: data.fileUrl
       };
-      
     } catch (invokeError) {
       console.error('Error during upload process:', invokeError);
       console.error('Error details:', JSON.stringify(invokeError, null, 2));

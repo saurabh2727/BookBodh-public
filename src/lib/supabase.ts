@@ -9,4 +9,11 @@ if (!supabaseUrl || !supabaseAnonKey) {
   console.error('Missing Supabase URL or Anon Key.');
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Create a single client instance to avoid duplicate client warnings
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true
+  }
+});
+

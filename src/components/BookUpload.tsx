@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,6 +13,7 @@ import {
 import { Loader2, AlertCircle, Check } from 'lucide-react';
 import { uploadBook } from '@/services/api';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { toast } from "@/hooks/use-toast";
 
 interface BookUploadProps {
   onClose: () => void;
@@ -97,6 +99,7 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
         fileType: file.type
       });
       
+      // We're using the edge function for upload, so no need to create bucket here
       const result = await uploadBook(file, title, author, category);
       
       console.log('Upload result:', result);
@@ -105,6 +108,12 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
         setUploadSuccess(true);
         setBookId(result.bookId || null);
         setChunksCount(result.chunksCount || null);
+        
+        toast({
+          title: "Book uploaded successfully",
+          description: `"${title}" has been uploaded and is being processed.`,
+          variant: "default",
+        });
         
         // Enhanced success message with book ID and chunks count
         let successMessage = `Book "${title}" uploaded successfully`;
@@ -118,6 +127,11 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
         onUploadComplete(true, successMessage, result.bookId);
       } else {
         setError(result.message || 'Upload failed. Please try again.');
+        toast({
+          title: "Upload failed",
+          description: result.message || 'Please try again.',
+          variant: "destructive",
+        });
         onUploadComplete(false, result.message || 'Upload failed. Please try again.');
       }
     } catch (error) {
@@ -125,6 +139,13 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       setError('Upload failed. Please try again.');
       setDetailedError(errorMessage);
+      
+      toast({
+        title: "Upload error",
+        description: "An unexpected error occurred. Please try again.",
+        variant: "destructive",
+      });
+      
       onUploadComplete(false, errorMessage);
     } finally {
       setIsUploading(false);
