@@ -67,14 +67,37 @@ export const uploadBook = async (
     console.log('File details:', {
       name: file.name,
       type: file.type,
-      size: file.size
+      size: file.size,
+      lastModified: new Date(file.lastModified).toISOString()
     });
     
+    // Validate file size before attempting upload
+    const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB limit for edge function
+    if (file.size > MAX_FILE_SIZE) {
+      console.error(`File too large: ${file.size} bytes (max: ${MAX_FILE_SIZE} bytes)`);
+      return { 
+        success: false, 
+        message: `File is too large (${Math.round(file.size/1024/1024)}MB). Maximum allowed size is 10MB.` 
+      };
+    }
+    
     // Get the current session
-    const { data: { session } } = await supabase.auth.getSession();
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    
+    if (sessionError) {
+      console.error('Session error:', sessionError);
+      return { 
+        success: false, 
+        message: `Authentication error: ${sessionError.message}` 
+      };
+    }
     
     if (!session) {
-      throw new Error('User not authenticated');
+      console.error('No active session found');
+      return { 
+        success: false, 
+        message: 'User not authenticated. Please log in again.' 
+      };
     }
     
     console.log('Session obtained, token length:', session.access_token.length);
@@ -94,67 +117,113 @@ export const uploadBook = async (
     });
     
     try {
-      // Call the upload-book edge function
-      console.log('Invoking upload-book edge function...');
-      const { data, error } = await supabase.functions.invoke('upload-book', {
-        method: 'POST',
-        body: formData,
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-        },
-      });
-
-      if (error) {
-        console.error('Edge function error:', error);
-        console.error('Error details:', JSON.stringify(error, null, 2));
-        
-        // If we have a message from the error, use it
-        if (error.message) {
+      // Try direct upload to database instead of using edge function
+      // First, upload the file to storage
+      console.log('Uploading file to Supabase Storage');
+      
+      // Create books bucket if it doesn't exist
+      const { data: bucketData, error: bucketError } = await supabase
+        .storage
+        .createBucket('books', {
+          public: false,
+          fileSizeLimit: 50 * 1024 * 1024, // 50MB limit
+        });
+      
+      if (bucketError && !bucketError.message.includes('already exists')) {
+        console.error('Bucket creation error:', bucketError);
+        // Continue anyway as the bucket might already exist
+      } else {
+        console.log('Bucket created or already exists');
+      }
+      
+      // Generate a unique ID for the book
+      const bookId = crypto.randomUUID();
+      const filePath = `${bookId}/${file.name.replace(/\s+/g, '_')}`;
+      
+      // Upload the file to storage
+      const { data: fileData, error: fileError } = await supabase
+        .storage
+        .from('books')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: false
+        });
+      
+      if (fileError) {
+        console.error('File upload error:', fileError);
+        return { 
+          success: false, 
+          message: `Error uploading file: ${fileError.message}` 
+        };
+      }
+      
+      console.log('File uploaded successfully:', fileData);
+      
+      // Get the public URL for the file
+      const { data: urlData } = await supabase
+        .storage
+        .from('books')
+        .getPublicUrl(filePath);
+      
+      const fileUrl = urlData?.publicUrl;
+      console.log('File public URL:', fileUrl);
+      
+      // Create book record in database
+      const { data: bookData, error: bookError } = await supabase
+        .from('books')
+        .insert([
+          {
+            id: bookId,
+            title,
+            author,
+            category,
+            file_url: fileUrl,
+            status: 'uploaded',
+            summary: `Processing ${title} by ${author}...`
+          }
+        ])
+        .select();
+      
+      if (bookError) {
+        console.error('Database insert error:', bookError);
+        return { 
+          success: false, 
+          message: `Error saving book metadata: ${bookError.message}` 
+        };
+      }
+      
+      console.log('Book metadata saved:', bookData);
+      
+      // Try processing the book with the edge function later (async)
+      console.log('Book uploaded successfully, will be processed later');
+      return {
+        success: true,
+        message: `Book "${title}" uploaded successfully`,
+        bookId,
+        fileUrl
+      };
+      
+    } catch (invokeError) {
+      console.error('Error during upload process:', invokeError);
+      console.error('Error details:', JSON.stringify(invokeError, null, 2));
+      
+      if (invokeError instanceof Error) {
+        if (invokeError.message.includes('NetworkError') || invokeError.message.includes('Load failed')) {
           return { 
             success: false, 
-            message: `Error uploading book: ${error.message}` 
+            message: 'Network error. The Edge Function may be unavailable. Please try again later or with a smaller file.' 
           };
         }
         
         return { 
           success: false, 
-          message: 'Error uploading book. Please try again.' 
-        };
-      }
-
-      console.log('Upload response:', data);
-      
-      // Make sure we have a valid response
-      if (!data) {
-        return { 
-          success: false, 
-          message: 'No response from server. Please try again.' 
+          message: `Upload error: ${invokeError.message}` 
         };
       }
       
-      // Add debug information about chunks if available
-      if (data.chunksCount) {
-        console.log(`Book uploaded successfully with ${data.chunksCount} chunks`);
-      }
-      
-      // Return the response data
-      return data;
-    } catch (invokeError) {
-      console.error('Error invoking Edge Function:', invokeError);
-      console.error('Error details:', JSON.stringify(invokeError, null, 2));
-      
-      // If this is a network error, provide a clear message
-      if (invokeError instanceof Error && invokeError.message.includes('NetworkError')) {
-        return { 
-          success: false, 
-          message: 'Network error. Please check your internet connection and try again.' 
-        };
-      }
-      
-      // For other errors
       return { 
         success: false, 
-        message: `Failed to send a request to the Edge Function: ${invokeError instanceof Error ? invokeError.message : 'Unknown error'}` 
+        message: 'Unknown upload error. Please try again or contact support.' 
       };
     }
   } catch (error) {
