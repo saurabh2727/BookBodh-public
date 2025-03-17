@@ -322,7 +322,7 @@ serve(async (req) => {
     const bookId = crypto.randomUUID();
     
     // Upload the file to storage
-    const filePath = `${bookId}/${file.name.replace(/\s+/g, "_")}`;
+    const filePath = `${jwtUser.id}/${file.name.replace(/\s+/g, "_")}`;
     const fileData = await file.arrayBuffer();
     
     console.log(`Uploading file ${file.name} to storage path: ${filePath}`);
@@ -441,50 +441,42 @@ serve(async (req) => {
       .update({ status: "processing" })
       .eq("id", bookId);
     
-    // Process the book text into chunks
-    console.log("Processing book text into chunks...");
-    let chunksCount;
-    try {
-      chunksCount = await processBookText(bookId, title, extractedText, supabaseClient, jwtUser.id);
-    } catch (processError) {
-      console.error("Error processing book text:", processError);
+    // Process the book text into chunks in background
+    EdgeRuntime.waitUntil((async () => {
+      // Process the book text into chunks
+      console.log("Processing book text into chunks...");
+      let chunksCount;
+      try {
+        chunksCount = await processBookText(bookId, title, extractedText, supabaseClient, jwtUser.id);
+      } catch (processError) {
+        console.error("Error processing book text:", processError);
+        
+        await supabaseClient
+          .from("books")
+          .update({ 
+            status: "error",
+            summary: `Error processing text: ${processError.message}`
+          })
+          .eq("id", bookId);
+        
+        return;
+      }
       
-      await supabaseClient
-        .from("books")
-        .update({ 
-          status: "error",
-          summary: `Error processing text: ${processError.message}`
-        })
-        .eq("id", bookId);
-      
-      return new Response(
-        JSON.stringify({ 
-          error: `Error processing book text: ${processError.message}`,
-          bookId,
-          fileUrl
-        }),
-        {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
-    }
-    
-    // Create a summary for the book
-    console.log("Creating book summary...");
-    try {
-      await createBookSummary(bookId, extractedText, supabaseClient);
-    } catch (summaryError) {
-      console.warn("Error creating book summary:", summaryError);
-      // Continue even if summary creation fails
-    }
+      // Create a summary for the book
+      console.log("Creating book summary...");
+      try {
+        await createBookSummary(bookId, extractedText, supabaseClient);
+      } catch (summaryError) {
+        console.warn("Error creating book summary:", summaryError);
+        // Continue even if summary creation fails
+      }
+    })());
     
     return new Response(
       JSON.stringify({
         success: true,
         message: `Book "${title}" uploaded and processed successfully`,
         bookId,
-        chunksCount,
         fileUrl
       }),
       {
