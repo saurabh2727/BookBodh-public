@@ -51,10 +51,27 @@ async function fetchBookChunks(supabase: any, bookId: string) {
     
   if (error) {
     console.error('Error fetching book chunks:', error);
+    console.error('Error details:', JSON.stringify(error, null, 2));
     return [];
   }
   
-  console.log(`Found ${data.length} chunks`);
+  console.log(`Found ${data?.length || 0} chunks for book ID: ${bookId}`);
+  
+  // Log first chunk details for debugging if available
+  if (data && data.length > 0) {
+    const firstChunk = data[0];
+    console.log('First chunk sample:', {
+      id: firstChunk.id,
+      book_id: firstChunk.book_id,
+      chunk_index: firstChunk.chunk_index,
+      title: firstChunk.title,
+      textLength: firstChunk.text?.length || 0,
+      summaryLength: firstChunk.summary?.length || 0
+    });
+  } else {
+    console.warn(`No chunks found for book ID: ${bookId}`);
+  }
+  
   return data || [];
 }
 
@@ -70,10 +87,18 @@ async function fetchBook(supabase: any, bookId: string) {
     
   if (error) {
     console.error('Error fetching book:', error);
+    console.error('Error details:', JSON.stringify(error, null, 2));
     return null;
   }
   
-  console.log('Found book:', data?.title);
+  console.log('Found book:', {
+    id: data?.id,
+    title: data?.title,
+    author: data?.author,
+    status: data?.status,
+    chunks_count: data?.chunks_count
+  });
+  
   return data;
 }
 
@@ -89,11 +114,18 @@ async function searchBookByTitle(supabase: any, title: string) {
     
   if (error) {
     console.error('Error searching for book:', error);
+    console.error('Error details:', JSON.stringify(error, null, 2));
     return null;
   }
   
   if (data && data.length > 0) {
-    console.log('Found book:', data[0].title);
+    console.log('Found book:', {
+      id: data[0].id,
+      title: data[0].title,
+      author: data[0].author,
+      status: data[0].status,
+      chunks_count: data[0].chunks_count
+    });
     return data[0];
   }
   
@@ -285,13 +317,79 @@ serve(async (req) => {
         
         // Then, get book chunks
         chunks = await fetchBookChunks(supabaseClient, bookId);
-        console.log(`Fetched ${chunks.length} chunks for book "${book}"`);
+        console.log(`Fetched ${chunks.length} chunks for book "${book}" (ID: ${bookId})`);
+        
+        // If no chunks found but book exists, this is an error state
+        if (chunks.length === 0) {
+          console.error(`No chunks found for book ID: ${bookId} despite book existing in database`);
+          
+          // Check book status
+          console.log(`Book status: ${bookData.status}, chunks_count: ${bookData.chunks_count}`);
+          
+          // If book status indicates processing, inform the user
+          if (bookData.status === 'processing') {
+            return new Response(
+              JSON.stringify({
+                response: `Your book "${book}" is still being processed. Please try again in a few moments.`,
+                book,
+                author,
+                bookId,
+                status: bookData.status
+              }),
+              {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+              }
+            );
+          }
+          
+          // If book status is error or failed, inform the user
+          if (bookData.status === 'error' || bookData.status === 'failed') {
+            return new Response(
+              JSON.stringify({
+                response: `There was an issue processing your book "${book}". You may need to try uploading it again.`,
+                book,
+                author,
+                bookId,
+                status: bookData.status
+              }),
+              {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+              }
+            );
+          }
+          
+          // For other cases, return a generic error
+          return new Response(
+            JSON.stringify({
+              response: `I found "${book}" in your library, but I couldn't retrieve any content for it. This might be a technical issue.`,
+              book,
+              author,
+              bookId,
+              error: "No chunks found for book"
+            }),
+            {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            }
+          );
+        }
       } else {
         console.log(`No book found with ID: ${bookId}`);
+        
+        return new Response(
+          JSON.stringify({
+            response: `I couldn't find a book with the specified ID in your library. You may need to select a different book or upload it again.`,
+            book: null,
+            author: null,
+            error: `Book not found with ID: ${bookId}`
+          }),
+          {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
       }
     }
 
-    // If we have a book parameter but no book ID, use a different error message
+    // If we have a book parameter but no book ID, try to find the book
     if (book && !bookId) {
       console.log('Book title provided without bookId');
       
@@ -302,15 +400,13 @@ serve(async (req) => {
         if (foundBookData) {
           console.log('Found book by title:', foundBookData.title);
           
-          // Process with the found bookId
-          const foundBookId = foundBookData.id;
-          
           // Return a response asking user to select this book directly
           return new Response(
             JSON.stringify({
               response: `I found "${foundBookData.title}" in your library. Please try asking your question again by selecting this book directly.`,
               book: foundBookData.title,
-              author: foundBookData.author
+              author: foundBookData.author,
+              foundBookId: foundBookData.id
             }),
             {
               headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -331,11 +427,13 @@ serve(async (req) => {
         );
       } catch (err) {
         console.error('Error processing book title:', err);
+        console.error('Error stack:', err.stack);
         return new Response(
           JSON.stringify({
             response: `I couldn't process your query about "${book}". Please try selecting a book from your library directly.`,
             book: null,
-            author: null
+            author: null,
+            error: `Error processing book title: ${err.message}`
           }),
           {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -353,7 +451,11 @@ serve(async (req) => {
       
       console.log('Generated response with content');
       return new Response(
-        JSON.stringify(response),
+        JSON.stringify({
+          ...response,
+          bookId: bookId,
+          chunksCount: chunks.length
+        }),
         {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         }
@@ -383,7 +485,9 @@ serve(async (req) => {
         JSON.stringify({
           response,
           book: null,
-          author: null
+          author: null,
+          bookId: null,
+          chunksCount: 0
         }),
         {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -412,7 +516,10 @@ serve(async (req) => {
         JSON.stringify({
           response: `I couldn't find any content for "${book}". Please try uploading the book or selecting a different one.`,
           book,
-          author: null
+          author: null,
+          bookId: bookId,
+          error: "No chunks found",
+          chunksCount: 0
         }),
         {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -421,12 +528,14 @@ serve(async (req) => {
     }
   } catch (error) {
     console.error('Error processing request:', error);
+    console.error('Error stack:', error.stack);
     
     return new Response(
       JSON.stringify({
         response: 'I encountered an error processing your request. Please try again.',
         book: null,
-        author: null
+        author: null,
+        error: `Server error: ${error.message || "Unknown error"}`
       }),
       {
         status: 500,

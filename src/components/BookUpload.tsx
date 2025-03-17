@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Loader2, AlertCircle } from 'lucide-react';
+import { Loader2, AlertCircle, Check } from 'lucide-react';
 import { uploadBook } from '@/services/api';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
@@ -27,6 +27,9 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detailedError, setDetailedError] = useState<string | null>(null);
+  const [uploadSuccess, setUploadSuccess] = useState(false);
+  const [bookId, setBookId] = useState<string | null>(null);
+  const [chunksCount, setChunksCount] = useState<number | null>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -44,6 +47,9 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
       setFile(selectedFile);
       setError(null);
       setDetailedError(null);
+      setUploadSuccess(false);
+      setBookId(null);
+      setChunksCount(null);
       
       // Try to extract title from filename if not set
       if (!title) {
@@ -80,6 +86,9 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
       setIsUploading(true);
       setError(null);
       setDetailedError(null);
+      setUploadSuccess(false);
+      setBookId(null);
+      setChunksCount(null);
       
       console.log('Uploading book with details:', {
         title,
@@ -94,7 +103,20 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
       console.log('Upload result:', result);
       
       if (result.success) {
-        onUploadComplete(true, result.message, result.bookId);
+        setUploadSuccess(true);
+        setBookId(result.bookId || null);
+        setChunksCount(result.chunksCount || null);
+        
+        // Enhanced success message with book ID and chunks count
+        let successMessage = `Book "${title}" uploaded successfully`;
+        if (result.bookId) {
+          successMessage += `, ID: ${result.bookId}`;
+        }
+        if (result.chunksCount) {
+          successMessage += `, ${result.chunksCount} chunks created`;
+        }
+        
+        onUploadComplete(true, successMessage, result.bookId);
       } else {
         setError(result.message || 'Upload failed. Please try again.');
         onUploadComplete(false, result.message || 'Upload failed. Please try again.');
@@ -120,7 +142,7 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
           onChange={handleFileChange} 
           accept="application/pdf,.pdf"
           className="mt-1"
-          disabled={isUploading}
+          disabled={isUploading || uploadSuccess}
         />
         {!file && <p className="text-xs text-muted-foreground mt-1">Select a PDF file to upload</p>}
         {file && <p className="text-xs text-muted-foreground mt-1">Selected: {file.name}</p>}
@@ -134,7 +156,7 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Book title"
           className="mt-1"
-          disabled={isUploading}
+          disabled={isUploading || uploadSuccess}
         />
       </div>
       
@@ -146,7 +168,7 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
           onChange={(e) => setAuthor(e.target.value)}
           placeholder="Author name"
           className="mt-1"
-          disabled={isUploading}
+          disabled={isUploading || uploadSuccess}
         />
       </div>
       
@@ -156,7 +178,7 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
           defaultValue="Non-Fiction" 
           value={category} 
           onValueChange={setCategory}
-          disabled={isUploading}
+          disabled={isUploading || uploadSuccess}
         >
           <SelectTrigger className="mt-1">
             <SelectValue placeholder="Select a category" />
@@ -189,14 +211,34 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
         </Alert>
       )}
       
+      {uploadSuccess && (
+        <Alert variant="success" className="bg-green-50 border-green-200">
+          <Check className="h-4 w-4 text-green-600" />
+          <AlertTitle className="text-green-800">Success</AlertTitle>
+          <AlertDescription className="text-green-700">
+            Book "{title}" uploaded successfully!
+            {bookId && (
+              <div className="mt-1 text-xs">
+                Book ID: <span className="font-mono">{bookId}</span>
+              </div>
+            )}
+            {chunksCount && (
+              <div className="text-xs">
+                Chunks created: {chunksCount}
+              </div>
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
+      
       <div className="flex justify-end gap-2 pt-2">
         <Button 
           type="submit" 
-          disabled={isUploading}
+          disabled={isUploading || uploadSuccess}
           className="gap-2"
         >
           {isUploading && <Loader2 className="h-4 w-4 animate-spin" />}
-          {isUploading ? 'Uploading...' : 'Upload Book'}
+          {isUploading ? 'Uploading...' : uploadSuccess ? 'Uploaded Successfully' : 'Upload Book'}
         </Button>
       </div>
     </form>

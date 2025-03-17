@@ -1,3 +1,4 @@
+
 import { ChatRequest, ChatResponse, Book } from '../types';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -60,7 +61,7 @@ export const uploadBook = async (
   title: string, 
   author: string, 
   category: string
-): Promise<{ success: boolean; message: string; bookId?: string; fileUrl?: string }> => {
+): Promise<{ success: boolean; message: string; bookId?: string; chunksCount?: number; fileUrl?: string }> => {
   try {
     console.log('Uploading book to Supabase Edge Function');
     console.log('File details:', {
@@ -131,6 +132,12 @@ export const uploadBook = async (
         };
       }
       
+      // Add debug information about chunks if available
+      if (data.chunksCount) {
+        console.log(`Book uploaded successfully with ${data.chunksCount} chunks`);
+      }
+      
+      // Return the response data
       return data;
     } catch (invokeError) {
       console.error('Error invoking Edge Function:', invokeError);
@@ -221,6 +228,14 @@ export const fetchUserBooks = async (): Promise<Book[]> => {
       throw new Error(error.message || 'Error fetching books');
     }
     
+    // Log books data for debugging
+    console.log(`Fetched ${data.length} books:`, data.map(b => ({
+      id: b.id,
+      title: b.title,
+      status: b.status,
+      chunks_count: b.chunks_count
+    })));
+    
     return data.map(book => ({
       id: book.id,
       title: book.title,
@@ -230,6 +245,8 @@ export const fetchUserBooks = async (): Promise<Book[]> => {
       coverColor: getCoverColorByCategory(book.category),
       imageUrl: book.icon_url || undefined,
       fileUrl: book.file_url,
+      status: book.status,
+      chunksCount: book.chunks_count
     }));
   } catch (error) {
     console.error('Error fetching books:', error);
@@ -255,7 +272,18 @@ export const fetchBookChunks = async (bookId: string) => {
       throw new Error(error.message || 'Error fetching book chunks');
     }
     
-    console.log(`Fetched ${data.length} chunks`);
+    console.log(`Fetched ${data.length} chunks for book ${bookId}`);
+    
+    // Log first chunk for debugging
+    if (data.length > 0) {
+      console.log('First chunk sample:', {
+        id: data[0].id,
+        book_id: data[0].book_id,
+        chunk_index: data[0].chunk_index,
+        textLength: data[0].text?.length
+      });
+    }
+    
     return data;
   } catch (error) {
     console.error('Error fetching book chunks:', error);
