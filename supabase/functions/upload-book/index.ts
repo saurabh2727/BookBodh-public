@@ -1,647 +1,508 @@
 
-// supabase/functions/upload-book/index.ts
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.38.4";
+import { extract } from "https://esm.sh/pdf-parse@1.1.1";
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { corsHeaders } from '../_shared/cors.ts';
-import { v4 as uuidv4 } from 'https://esm.sh/uuid@9';
-import * as pdfParse from 'https://esm.sh/pdf-parse@1.1.1';
+// CORS headers for API responses
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
+};
 
-// The maximum file size allowed (50MB)
-const MAX_FILE_SIZE = 50 * 1024 * 1024;  // 50MB in bytes
+// Get the chunk size from environment or use a default
+const CHUNK_SIZE = parseInt(Deno.env.get("CHUNK_SIZE") || "1000");
+const CHUNK_OVERLAP = parseInt(Deno.env.get("CHUNK_OVERLAP") || "200");
+const FASTAPI_BACKEND_URL = Deno.env.get("FASTAPI_BACKEND_URL") || "https://ethical-wisdom-bot.lovable.app/upload-book";
+const BUCKET_NAME = "books";
 
-// FastAPI backend URL for fallback text extraction
-const FASTAPI_BACKEND_URL = "https://your-fastapi-backend-url";
-
-// Function to extract text from PDF bytes using pdf-parse
-async function extractTextFromPDF(buffer: ArrayBuffer): Promise<string> {
-  console.log("Extracting text from PDF buffer of size:", buffer.byteLength);
-  
+async function extractTextFromPDF(pdfData: Uint8Array): Promise<string> {
   try {
-    // Convert ArrayBuffer to Uint8Array for pdf-parse
-    const data = new Uint8Array(buffer);
+    console.log("Attempting to extract text using pdf-parse...");
+    const result = await extract(pdfData);
+    const text = result.text.trim();
     
-    // Use pdf-parse to extract text
-    const pdfData = await pdfParse.default(data);
+    console.log(`Extracted ${text.length} characters of text`);
     
-    // Check if we got meaningful text
-    if (pdfData.text && pdfData.text.trim().length > 100) {
-      console.log(`Successfully extracted ${pdfData.text.length} characters of text`);
-      return pdfData.text;
-    } else {
-      console.warn("PDF-parse extracted too little text, attempting fallback method");
-    }
-  } catch (error) {
-    console.error("Error in primary text extraction:", error);
-    console.warn("Primary text extraction failed, attempting fallback method");
-  }
-  
-  // Fallback method: Manual text extraction
-  return fallbackTextExtraction(buffer);
-}
-
-// Fallback text extraction method for when pdf-parse fails
-async function fallbackTextExtraction(buffer: ArrayBuffer): Promise<string> {
-  console.log("Using fallback text extraction method");
-  
-  try {
-    const decoder = new TextDecoder('utf-8');
-    const bytes = new Uint8Array(buffer);
-    let text = "";
-    
-    // Method 1: Look for text streams
-    console.log("Trying extraction method 1: Text streams");
-    const pdfString = decoder.decode(bytes);
-    
-    // Look for text objects with TJ or Tj operators
-    const textMatches = pdfString.match(/\[((?:[^\]\\]|\\.)*)\]\s*TJ|\(((?:[^)\\]|\\.)*)\)\s*Tj/g) || [];
-    for (const match of textMatches) {
-      // Clean up text by removing PDF encoding
-      let cleanText = match
-        .replace(/\\\(/g, '(')
-        .replace(/\\\)/g, ')')
-        .replace(/\\\\/g, '\\')
-        .replace(/\\n/g, ' ')
-        .replace(/\\r/g, ' ');
-        
-      // Remove brackets, TJ, Tj operators
-      cleanText = cleanText.replace(/\[(.*)\]\s*TJ|\((.*)\)\s*Tj/g, '$1$2');
-      
-      if (cleanText.trim().length > 0) {
-        text += cleanText + " ";
-      }
-    }
-    
-    // Method 2: Try to extract text between BT and ET markers
-    if (text.trim().length < 200) {
-      console.log("Trying extraction method 2: BT/ET blocks");
-      const btEtMatches = pdfString.match(/BT[\s\S]+?ET/g) || [];
-      for (const match of btEtMatches) {
-        // Extract text content from BT/ET blocks
-        const contentMatch = match.match(/\[((?:[^\]\\]|\\.)*)\]|(\((?:[^)\\]|\\.)*\))/g) || [];
-        for (const cm of contentMatch) {
-          let cleanText = cm.replace(/^\[|\]$|\(|\)$/g, '');
-          if (cleanText.trim().length > 0) {
-            text += cleanText + " ";
-          }
-        }
-      }
-    }
-    
-    // Method 3: Look for plain text content
-    if (text.trim().length < 200) {
-      console.log("Trying extraction method 3: Plain text");
-      // Find PDF object streams that might contain text
-      const streamMatches = pdfString.match(/stream\r?\n([\s\S]*?)\r?\nendstream/g) || [];
-      for (const match of streamMatches) {
-        const streamContent = match.replace(/stream\r?\n|\r?\nendstream/g, '');
-        // Extract what looks like text
-        const textContent = streamContent.replace(/[^\x20-\x7E\t\r\n]/g, ' ').trim();
-        if (textContent.length > 50) {
-          text += textContent + " ";
-        }
-      }
-    }
-    
-    // Cleanup the extracted text
-    text = text.replace(/\\u[0-9a-fA-F]{4}/g, '') // Remove Unicode escape sequences
-               .replace(/\s+/g, ' ')              // Normalize whitespace
-               .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '') // Remove control chars
-               .trim();
-    
-    console.log(`Fallback extraction produced ${text.length} characters of text`);
-    
-    // If we still didn't get much text, generate placeholder text
-    if (text.trim().length < 100) {
-      console.warn("All text extraction methods failed to extract sufficient text");
-      return `This is placeholder text. The PDF extraction was not successful. This PDF may be scanned, encrypted, or using non-standard formatting that makes text extraction difficult. Uploaded at ${new Date().toISOString()}.`;
+    if (!text || text.length < 100) {
+      throw new Error("Extracted text is too short or empty");
     }
     
     return text;
   } catch (error) {
-    console.error("Error in fallback text extraction:", error, { stack: error.stack });
-    return `Failed to extract text from this PDF. Error: ${error.message}. Uploaded at ${new Date().toISOString()}.`;
+    console.error("PDF extraction error:", error.message);
+    throw error;
   }
 }
 
-// Try to extract text using FastAPI backend
-async function extractTextUsingFastAPI(file: File, formData: FormData): Promise<string | null> {
-  console.log("Attempting to extract text using FastAPI backend");
+async function fallbackTextExtraction(pdfData: Uint8Array): Promise<string> {
+  console.warn("Using fallback text extraction method");
   
+  // This is a very basic extraction - it may not work well for all PDFs
+  const decoder = new TextDecoder("utf-8");
+  const pdfText = decoder.decode(pdfData);
+  
+  // Look for text content between markers
+  const textSegments = pdfText.match(/BT.*?ET/gs) || [];
+  
+  // Extract text from these segments
+  let extractedText = "";
+  for (const segment of textSegments) {
+    // Extract anything that looks like text
+    const textMatches = segment.match(/\[(.*?)\]/g) || [];
+    for (const match of textMatches) {
+      extractedText += match.replace(/[\[\]]/g, "") + " ";
+    }
+  }
+  
+  return extractedText.trim() || "Failed to extract text using fallback method";
+}
+
+function isTextExtractedSuccessfully(text: string): boolean {
+  if (!text) return false;
+  if (text.length < 100) return false;
+  
+  // Check for common error messages
+  const errorPatterns = [
+    "Failed to extract",
+    "Error extracting",
+    "Could not extract",
+    "extraction failed",
+  ];
+  
+  for (const pattern of errorPatterns) {
+    if (text.toLowerCase().includes(pattern.toLowerCase())) {
+      return false;
+    }
+  }
+  
+  return true;
+}
+
+async function extractTextWithFastAPIFallback(fileData: ArrayBuffer, fileName: string): Promise<string> {
+  // First try with pdf-parse
   try {
-    const response = await fetch(`${FASTAPI_BACKEND_URL}/upload-book`, {
-      method: 'POST',
+    const pdfData = new Uint8Array(fileData);
+    const extractedText = await extractTextFromPDF(pdfData);
+    
+    if (isTextExtractedSuccessfully(extractedText)) {
+      console.log("Successfully extracted text with pdf-parse");
+      return extractedText;
+    }
+    
+    console.warn("Text extraction with pdf-parse produced low-quality results, falling back to FastAPI");
+  } catch (error) {
+    console.warn("Text extraction with pdf-parse failed, falling back to FastAPI:", error.message);
+  }
+  
+  // Try with FastAPI backend
+  try {
+    console.log("Attempting to extract text using FastAPI backend...");
+    
+    const formData = new FormData();
+    const blob = new Blob([new Uint8Array(fileData)], { type: "application/pdf" });
+    formData.append("file", blob, fileName);
+    
+    const response = await fetch(FASTAPI_BACKEND_URL, {
+      method: "POST",
       body: formData,
       headers: {
-        // No Content-Type header as it's set automatically for FormData
-      }
+        "Accept": "application/json",
+      },
     });
     
     if (!response.ok) {
-      console.error("FastAPI extraction failed with status:", response.status);
-      return null;
+      const errorText = await response.text();
+      throw new Error(`FastAPI returned error: ${response.status} - ${errorText}`);
     }
     
     const result = await response.json();
-    if (result.success && result.text && result.text.length > 100) {
-      console.log(`FastAPI backend extracted ${result.text.length} characters`);
+    
+    if (result.text && isTextExtractedSuccessfully(result.text)) {
+      console.log("Successfully extracted text with FastAPI backend");
       return result.text;
-    } else {
-      console.warn("FastAPI backend failed to extract sufficient text");
-      return null;
+    }
+    
+    console.warn("FastAPI text extraction failed or produced low-quality results");
+    throw new Error("FastAPI text extraction failed to produce usable text");
+  } catch (error) {
+    console.warn("FastAPI fallback failed:", error.message);
+  }
+  
+  // Last resort fallback
+  try {
+    console.warn("Falling back to manual extraction");
+    return await fallbackTextExtraction(new Uint8Array(fileData));
+  } catch (error) {
+    console.error("All text extraction methods failed");
+    throw new Error("Failed to extract text from PDF using all available methods");
+  }
+}
+
+function chunkText(text: string): string[] {
+  // Split text into sentences
+  const sentences = text.replace(/([.?!])\s*(?=[A-Z])/g, "$1|").split("|");
+  
+  // Initialize chunks
+  const chunks: string[] = [];
+  let currentChunk = "";
+  
+  // Process sentences into chunks
+  for (const sentence of sentences) {
+    // If adding this sentence would exceed the chunk size, start a new chunk
+    if (currentChunk.length + sentence.length > CHUNK_SIZE && currentChunk.length > 0) {
+      chunks.push(currentChunk);
+      
+      // Start the new chunk with overlap from the previous chunk
+      const words = currentChunk.split(" ");
+      if (words.length > CHUNK_OVERLAP / 5) { // Approximate words for overlap
+        currentChunk = words.slice(-Math.floor(CHUNK_OVERLAP / 5)).join(" ") + " ";
+      } else {
+        currentChunk = "";
+      }
+    }
+    
+    currentChunk += sentence + " ";
+  }
+  
+  // Add the last chunk if it's not empty
+  if (currentChunk.trim().length > 0) {
+    chunks.push(currentChunk.trim());
+  }
+  
+  return chunks;
+}
+
+async function processBookText(bookId: string, title: string, text: string, supabaseClient: any, userId: string): Promise<number> {
+  // Split the text into chunks
+  const chunks = chunkText(text);
+  console.log(`Split book into ${chunks.length} chunks`);
+  
+  // Insert chunks into the database
+  const chunkPromises = chunks.map(async (chunkText, index) => {
+    const { data: chunkData, error: chunkError } = await supabaseClient
+      .from("book_chunks")
+      .insert({
+        book_id: bookId,
+        chunk_index: index,
+        title: title,
+        text: chunkText,
+      });
+    
+    if (chunkError) {
+      console.error(`Error storing chunk ${index}:`, chunkError);
+      throw chunkError;
+    }
+    
+    return chunkData;
+  });
+  
+  // Wait for all chunks to be processed
+  await Promise.all(chunkPromises);
+  
+  // Update book with chunks count
+  const { error: updateError } = await supabaseClient
+    .from("books")
+    .update({ 
+      status: "processed",
+      chunks_count: chunks.length 
+    })
+    .eq("id", bookId);
+  
+  if (updateError) {
+    console.error("Error updating book with chunks count:", updateError);
+    throw updateError;
+  }
+  
+  return chunks.length;
+}
+
+async function createBookSummary(bookId: string, text: string, supabaseClient: any): Promise<void> {
+  try {
+    // For now, just create a simple summary (first 500 chars + ...)
+    const simpleSummary = text.substring(0, 500) + (text.length > 500 ? "..." : "");
+    
+    // Update the book with the summary
+    const { error: summaryError } = await supabaseClient
+      .from("books")
+      .update({ summary: simpleSummary })
+      .eq("id", bookId);
+    
+    if (summaryError) {
+      console.error("Error updating book with summary:", summaryError);
+      throw summaryError;
     }
   } catch (error) {
-    console.error("Error using FastAPI for extraction:", error);
-    return null;
+    console.error("Error creating book summary:", error);
+    // Don't throw, as this is not critical
   }
 }
 
-// Function to extract text from PDF and create chunks
-async function processBookText(text: string, title: string, chunkSize = 500): Promise<any[]> {
-  console.log(`Processing book text: ${title}, text length: ${text.length}`);
-  
-  // Split text into words and then groups of words (chunks)
-  const words = text.split(/\s+/);
-  const chunks = [];
-  
-  let currentChunk = [];
-  let wordCount = 0;
-  
-  for (const word of words) {
-    if (word.trim().length === 0) continue; // Skip empty words
-    
-    currentChunk.push(word);
-    wordCount++;
-    
-    if (wordCount >= chunkSize) {
-      chunks.push(currentChunk.join(' '));
-      currentChunk = [];
-      wordCount = 0;
-    }
-  }
-  
-  // Add the last chunk if there are remaining words
-  if (currentChunk.length > 0) {
-    chunks.push(currentChunk.join(' '));
-  }
-  
-  console.log(`Created ${chunks.length} chunks from book text`);
-  
-  // Format chunks with metadata and create summaries
-  return chunks.map((chunkText, index) => {
-    // Create a summary by taking the first ~50 words or 300 characters
-    const words = chunkText.split(/\s+/).slice(0, 50);
-    const summaryText = words.join(' ') + (words.length >= 50 ? '...' : '');
-    
-    return {
-      chunk_index: index,
-      title: `${title} - Part ${index + 1}`,
-      text: chunkText,
-      summary: summaryText.length > 10 ? summaryText : `Part ${index + 1} of ${title}`
-    };
-  });
-}
-
-// Function to create a book summary from the extracted text
-function createBookSummary(text: string, maxLength = 600): string {
-  // Take roughly the first 100 words or 600 characters for the book summary
-  const summary = text.substring(0, maxLength);
-  return summary.length < text.length ? summary + '...' : summary;
-}
-
-Deno.serve(async (req) => {
-  console.log("Upload book function called");
-  
+serve(async (req) => {
   // Handle CORS preflight requests
-  if (req.method === 'OPTIONS') {
-    console.log("Handling CORS preflight request");
-    return new Response('ok', { headers: corsHeaders });
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
   }
-
+  
   try {
-    console.log("Starting book upload process");
-    
-    // Create Supabase client
-    const authHeader = req.headers.get('Authorization');
-    console.log("Auth header exists:", authHeader !== null);
+    // Get authentication token from request
+    const authHeader = req.headers.get("Authorization");
     
     if (!authHeader) {
-      console.error("Missing Authorization header");
       return new Response(
-        JSON.stringify({ success: false, error: 'No authorization header provided' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({
+          error: "Missing Authorization header",
+        }),
+        {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
       );
     }
     
-    // Create the Supabase client
+    // Create a Supabase client with the user's JWT
     const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      Deno.env.get("SUPABASE_URL") ?? "",
+      Deno.env.get("SUPABASE_ANON_KEY") ?? "",
       {
         global: { headers: { Authorization: authHeader } },
+        auth: { persistSession: false },
       }
     );
     
-    console.log("Supabase client created");
-
-    // Get the user from the session - THIS IS THE CRITICAL CHANGE
-    const {
-      data: { user: jwtUser },
-      error: userError,
-    } = await supabaseClient.auth.getUser();
-
-    const {
-      data: { user },
-      error: userError2,
-    } = await supabaseClient.auth.getUser();
-
-    console.log("JWT user ID:", jwtUser?.id, "User from token:", user?.id);
-
-    if (userError || !jwtUser) {
-      console.error("Authentication error:", userError || "No user found");
+    // Get the authenticated user from JWT
+    const { data: { user: jwtUser }, error: authError } = await supabaseClient.auth.getUser();
+    
+    if (authError || !jwtUser) {
+      console.error("Authentication error:", authError);
+      return new Response(
+        JSON.stringify({
+          error: "Authentication failed",
+          details: authError?.message || "User not found in JWT",
+        }),
+        {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+    
+    console.log("JWT user ID:", jwtUser.id);
+    
+    // Parse the multipart form data
+    const formData = await req.formData();
+    const file = formData.get("file") as File;
+    const title = formData.get("title") as string;
+    const author = formData.get("author") as string;
+    const category = formData.get("category") as string;
+    
+    // Validation
+    if (!file || !title) {
+      return new Response(
+        JSON.stringify({ error: "File and title are required" }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+    
+    // Check file type
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      return new Response(
+        JSON.stringify({ error: "Only PDF files are allowed" }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+    
+    // Generate a unique ID for the book
+    const bookId = crypto.randomUUID();
+    
+    // Upload the file to storage
+    const filePath = `${bookId}/${file.name.replace(/\s+/g, "_")}`;
+    const fileData = await file.arrayBuffer();
+    
+    console.log(`Uploading file ${file.name} to storage path: ${filePath}`);
+    
+    const { data: uploadData, error: uploadError } = await supabaseClient
+      .storage
+      .from(BUCKET_NAME)
+      .upload(filePath, fileData, {
+        contentType: "application/pdf",
+        cacheControl: "3600",
+        upsert: false
+      });
+    
+    if (uploadError) {
+      console.error("File upload error:", uploadError);
+      return new Response(
+        JSON.stringify({ error: `Error uploading file: ${uploadError.message}` }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+    
+    console.log("File uploaded successfully");
+    
+    // Get the public URL for the file
+    const { data: urlData } = await supabaseClient
+      .storage
+      .from(BUCKET_NAME)
+      .getPublicUrl(filePath);
+    
+    const fileUrl = urlData?.publicUrl;
+    
+    // Create book record in database
+    console.log("Creating book record in database with user_id:", jwtUser.id);
+    
+    const { data: bookData, error: bookError } = await supabaseClient
+      .from("books")
+      .insert({
+        id: bookId,
+        title,
+        author: author || "Unknown",
+        category: category || "Uncategorized",
+        file_url: fileUrl,
+        user_id: jwtUser.id, // Use jwtUser.id to ensure it matches auth.uid()
+        status: "uploading",
+        summary: `Processing ${title}...`
+      })
+      .select();
+    
+    if (bookError) {
+      console.error("Database insert error:", bookError);
+      if (bookError.message.includes("violates row-level security policy")) {
+        console.error("RLS violation:", bookError.message, bookError.details);
+      }
+      
       return new Response(
         JSON.stringify({ 
-          success: false, 
-          error: userError ? `Authentication error: ${userError.message}` : 'User not authenticated' 
+          error: `Error saving book metadata: ${bookError.message}`,
+          details: bookError
         }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-    
-    console.log("User authenticated:", jwtUser.id);
-
-    // Make sure the request is multipart/form-data
-    const contentType = req.headers.get('content-type') || '';
-    console.log("Content-Type:", contentType);
-    
-    if (!contentType.includes('multipart/form-data')) {
-      console.error("Invalid content type:", contentType);
-      return new Response(
-        JSON.stringify({ success: false, error: 'Request must be multipart/form-data' }),
-        { 
-          status: 400, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
         }
       );
     }
     
-    console.log("Valid content type");
-
+    console.log("Book metadata saved successfully");
+    
+    // Update book status to "extracting"
+    await supabaseClient
+      .from("books")
+      .update({ status: "extracting" })
+      .eq("id", bookId);
+    
+    // Extract text from PDF
+    console.log("Extracting text from PDF...");
+    let extractedText;
     try {
-      // Try to parse the form data
-      const formData = await req.formData();
-      console.log("Form data parsed successfully");
+      extractedText = await extractTextWithFastAPIFallback(fileData, file.name);
       
-      // Extract fields from form data
-      const file = formData.get('file') as File;
-      const title = formData.get('title') as string;
-      const author = formData.get('author') as string;
-      const category = formData.get('category') as string;
-      
-      console.log("Form data extracted:", {
-        fileExists: !!file,
-        fileType: file?.type,
-        fileSize: file?.size,
-        title,
-        author,
-        category
-      });
-
-      // Validate the file and metadata
-      if (!file) {
-        console.error("No file provided");
-        return new Response(
-          JSON.stringify({ success: false, error: 'No file provided' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
+      if (!extractedText || extractedText.length < 100) {
+        throw new Error("Failed to extract meaningful text from the PDF");
       }
       
-      if (!title || !author || !category) {
-        console.error("Missing required metadata", { title, author, category });
-        return new Response(
-          JSON.stringify({ success: false, error: 'Title, author, and category are required' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
+      console.log(`Successfully extracted ${extractedText.length} characters of text`);
+    } catch (extractError) {
+      console.error("Text extraction failed:", extractError);
       
-      // Check if file is a PDF
-      if (!file.name.toLowerCase().endsWith('.pdf')) {
-        console.error("File is not a PDF");
-        return new Response(
-          JSON.stringify({ success: false, error: 'Only PDF files are allowed' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
+      await supabaseClient
+        .from("books")
+        .update({ 
+          status: "error",
+          summary: `Error extracting text: ${extractError.message}`
+        })
+        .eq("id", bookId);
       
-      // Check file size
-      if (file.size > MAX_FILE_SIZE) {
-        console.error("File too large:", file.size);
-        return new Response(
-          JSON.stringify({ success: false, error: `File size exceeds maximum allowed (50MB)` }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-      
-      console.log("File validation passed");
-      
-      // Generate a unique book ID
-      const bookId = uuidv4();
-      console.log("Generated book ID:", bookId);
-      
-      // Process the file
-      try {
-        console.log("Processing file...");
-        
-        // Convert file to ArrayBuffer for processing
-        const buffer = await file.arrayBuffer();
-        console.log("File converted to ArrayBuffer, size:", buffer.byteLength);
-        
-        // Check if it's a valid PDF by looking at the header
-        const firstBytes = new Uint8Array(buffer.slice(0, 5));
-        const header = new TextDecoder().decode(firstBytes);
-        console.log("File header:", header);
-        
-        if (!header.startsWith('%PDF-')) {
-          console.error("Invalid PDF header:", header);
-          return new Response(
-            JSON.stringify({ success: false, error: 'Invalid PDF file' }),
-            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          );
-        }
-        
-        console.log("Valid PDF header detected");
-        
-        // Extract text from PDF using our enhanced extraction function
-        console.log("Extracting text from PDF...");
-        let extractedText = "";
-        
-        try {
-          // PRIMARY METHOD: pdf-parse
-          extractedText = await extractTextFromPDF(buffer);
-          console.log(`Extracted ${extractedText.length} characters of text using pdf-parse`);
-          
-          // If pdf-parse didn't extract enough text, try FastAPI
-          if (extractedText.length < 100) {
-            console.warn("Text extraction failed with pdf-parse, falling back to FastAPI");
-            
-            // SECONDARY METHOD: FastAPI
-            const fastApiText = await extractTextUsingFastAPI(file, formData);
-            if (fastApiText && fastApiText.length >= 100) {
-              extractedText = fastApiText;
-              console.log(`Using text from FastAPI backend: ${extractedText.length} characters`);
-            } else {
-              // TERTIARY METHOD: Manual extraction (already tried in extractTextFromPDF)
-              console.warn("Falling back to manual extraction");
-              if (extractedText.length < 100) {
-                console.error("All extraction methods failed");
-                return new Response(
-                  JSON.stringify({ 
-                    success: false, 
-                    error: 'Unable to extract sufficient text from the PDF. The file may be encrypted, scanned, or in an unsupported format.' 
-                  }),
-                  { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-                );
-              }
-            }
-          }
-          
-          // Create a summary from the extracted text
-          const summary = createBookSummary(extractedText);
-          console.log("Created book summary, length:", summary.length);
-          
-          // Generate storage file path for the book
-          const filePath = `${bookId}/${file.name.replace(/\s+/g, '_')}`;
-          
-          // Create book record in database with jwtUser.id
-          const { data: bookData, error: bookError } = await supabaseClient
-            .from('books')
-            .insert({
-              id: bookId,
-              user_id: jwtUser.id, // CRITICAL CHANGE: Use jwtUser.id for RLS
-              title,
-              author,
-              category,
-              summary,
-              file_url: filePath,
-              status: 'processing'
-            })
-            .select();
-            
-          if (bookError) {
-            console.error("Error inserting book into database:", bookError);
-            console.error("Error details:", JSON.stringify(bookError, null, 2));
-            console.error("RLS violation:", bookError.message, bookError.details);
-            return new Response(
-              JSON.stringify({ success: false, error: `Database error: ${bookError.message}` }),
-              { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-            );
-          }
-          
-          console.log("Book metadata inserted into database, ID:", bookId);
-          
-          // Process text into chunks
-          console.log("Processing book text into chunks...");
-          const chunks = await processBookText(extractedText, title);
-          console.log(`Created ${chunks.length} chunks from book text`);
-          
-          if (chunks.length === 0) {
-            console.error("No chunks created from book text");
-            return new Response(
-              JSON.stringify({ 
-                success: false, 
-                error: 'Failed to create chunks from the extracted text' 
-              }),
-              { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-            );
-          }
-          
-          // Use EdgeRuntime.waitUntil to process chunks in the background
-          EdgeRuntime.waitUntil((async () => {
-            console.log("Starting background chunk processing for book:", bookId);
-            let successCount = 0;
-            let errorCount = 0;
-            
-            try {
-              // Upload file to storage first
-              const { data: storageData, error: storageError } = await supabaseClient
-                .storage
-                .from('books')
-                .upload(filePath, file, {
-                  cacheControl: '3600',
-                  upsert: false
-                });
-                
-              if (storageError) {
-                console.error("Error uploading file to storage:", storageError);
-              } else {
-                console.log("File uploaded to storage successfully:", filePath);
-                
-                // Update the file_url with the public URL
-                const { data: urlData } = await supabaseClient
-                  .storage
-                  .from('books')
-                  .getPublicUrl(filePath);
-                  
-                if (urlData?.publicUrl) {
-                  const { error: updateError } = await supabaseClient
-                    .from('books')
-                    .update({ file_url: urlData.publicUrl })
-                    .eq('id', bookId);
-                    
-                  if (updateError) {
-                    console.error("Error updating file URL:", updateError);
-                  } else {
-                    console.log("Updated file URL to:", urlData.publicUrl);
-                  }
-                }
-              }
-            
-              // Insert chunks into database
-              console.log(`Inserting ${chunks.length} chunks for book ID: ${bookId}`);
-              
-              // To improve reliability, insert chunks in smaller batches
-              const BATCH_SIZE = 5;
-              for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
-                const batch = chunks.slice(i, i + BATCH_SIZE);
-                console.log(`Processing batch ${Math.floor(i/BATCH_SIZE) + 1} of ${Math.ceil(chunks.length/BATCH_SIZE)}, size: ${batch.length}`);
-                
-                for (const chunk of batch) {
-                  // Clean chunk text of control characters
-                  const cleanedText = chunk.text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '');
-                  const cleanedSummary = chunk.summary.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '');
-                  
-                  const { error: chunkError } = await supabaseClient
-                    .from('book_chunks')
-                    .insert({
-                      book_id: bookId,
-                      chunk_index: chunk.chunk_index,
-                      title: chunk.title,
-                      text: cleanedText,
-                      summary: cleanedSummary
-                    });
-                    
-                  if (chunkError) {
-                    console.error(`Error inserting chunk ${chunk.chunk_index}:`, chunkError);
-                    console.error("Error details:", JSON.stringify(chunkError, null, 2));
-                    errorCount++;
-                  } else {
-                    successCount++;
-                    console.log(`Inserted chunk ${chunk.chunk_index}, success count: ${successCount}`);
-                  }
-                }
-                
-                // Add a delay between batches to avoid overwhelming the database
-                if (i + BATCH_SIZE < chunks.length) {
-                  console.log("Pausing between batches...");
-                  await new Promise(resolve => setTimeout(resolve, 500));
-                }
-              }
-              
-              // After all chunks are processed, verify they were inserted correctly
-              const { data: verifyChunks, error: verifyError } = await supabaseClient
-                .from('book_chunks')
-                .select('id, chunk_index')
-                .eq('book_id', bookId);
-                
-              if (verifyError) {
-                console.error("Error verifying chunks:", verifyError);
-              } else {
-                console.log(`Verification found ${verifyChunks?.length || 0} chunks in database`);
-              }
-              
-              // Update book status based on chunk processing results
-              const finalStatus = errorCount === 0 ? 'processed' : 
-                               (successCount > 0 ? 'partially_processed' : 'failed');
-                               
-              console.log(`Updating book status to ${finalStatus}, success: ${successCount}, failed: ${errorCount}`);
-              
-              const { error: updateError } = await supabaseClient
-                .from('books')
-                .update({ 
-                  status: finalStatus,
-                  chunks_count: successCount,
-                  failed_chunks: errorCount
-                })
-                .eq('id', bookId);
-                
-              if (updateError) {
-                console.error("Error updating book status:", updateError);
-                console.error("Error details:", JSON.stringify(updateError, null, 2));
-              } else {
-                console.log(`Book processing completed with status: ${finalStatus}`);
-                console.log(`Successfully processed ${successCount} chunks with ${errorCount} failures`);
-              }
-            } catch (error) {
-              console.error("Background processing error:", error);
-              console.error("Error stack:", error.stack);
-              
-              // Try to update book status on error
-              try {
-                await supabaseClient
-                  .from('books')
-                  .update({ 
-                    status: 'error',
-                    chunks_count: successCount,
-                    failed_chunks: errorCount
-                  })
-                  .eq('id', bookId);
-                  
-                console.log("Updated book status to 'error' after exception");
-              } catch (updateError) {
-                console.error("Failed to update book status after error:", updateError);
-              }
-            }
-          })());
-          
-          // Return success response while processing continues in the background
-          console.log("Upload completed successfully, background processing started for book ID:", bookId);
-          return new Response(
-            JSON.stringify({
-              success: true,
-              message: `Book "${title}" uploaded successfully`,
-              bookId,
-              chunksCount: chunks.length
-            }),
-            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          );
-        } catch (extractError) {
-          console.error("Text extraction error:", extractError);
-          console.error("Error stack:", extractError.stack);
-          return new Response(
-            JSON.stringify({ 
-              success: false, 
-              error: `Failed to extract text from PDF: ${extractError.message || "Unknown extraction error"}` 
-            }),
-            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          );
-        }
-      } catch (processingError) {
-        console.error("Error processing file:", processingError);
-        console.error("Error stack:", processingError.stack);
-        return new Response(
-          JSON.stringify({ 
-            success: false, 
-            error: `Error processing file: ${processingError.message || "Unknown processing error"}` 
-          }),
-          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-    } catch (formDataError) {
-      console.error("Error parsing form data:", formDataError);
-      console.error("Error stack:", formDataError.stack);
       return new Response(
-        JSON.stringify({ success: false, error: `Error parsing form data: ${formDataError.message}` }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ 
+          error: `Text extraction failed: ${extractError.message}`,
+          bookId,
+          fileUrl
+        }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
       );
     }
+    
+    // Update book status to "processing"
+    await supabaseClient
+      .from("books")
+      .update({ status: "processing" })
+      .eq("id", bookId);
+    
+    // Process the book text into chunks
+    console.log("Processing book text into chunks...");
+    let chunksCount;
+    try {
+      chunksCount = await processBookText(bookId, title, extractedText, supabaseClient, jwtUser.id);
+    } catch (processError) {
+      console.error("Error processing book text:", processError);
+      
+      await supabaseClient
+        .from("books")
+        .update({ 
+          status: "error",
+          summary: `Error processing text: ${processError.message}`
+        })
+        .eq("id", bookId);
+      
+      return new Response(
+        JSON.stringify({ 
+          error: `Error processing book text: ${processError.message}`,
+          bookId,
+          fileUrl
+        }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+    
+    // Create a summary for the book
+    console.log("Creating book summary...");
+    try {
+      await createBookSummary(bookId, extractedText, supabaseClient);
+    } catch (summaryError) {
+      console.warn("Error creating book summary:", summaryError);
+      // Continue even if summary creation fails
+    }
+    
+    return new Response(
+      JSON.stringify({
+        success: true,
+        message: `Book "${title}" uploaded and processed successfully`,
+        bookId,
+        chunksCount,
+        fileUrl
+      }),
+      {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      }
+    );
   } catch (error) {
-    console.error("Unexpected error in upload-book function:", error);
-    console.error("Error stack:", error.stack);
+    console.error("Unexpected error:", error);
+    
     return new Response(
       JSON.stringify({ 
-        success: false, 
-        error: `Server error: ${error.message || "Unknown server error"}` 
+        error: `Unexpected error: ${error.message}` 
       }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      }
     );
   }
 });

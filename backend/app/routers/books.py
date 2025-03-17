@@ -128,7 +128,7 @@ async def upload_book(
                 "text": text  # Return the extracted text for Edge Function to use
             },
             headers={
-                "Access-Control-Allow-Origin": "https://ethical-wisdom-bot.lovable.app",
+                "Access-Control-Allow-Origin": "*",
                 "Access-Control-Allow-Methods": "POST, OPTIONS",
                 "Access-Control-Allow-Headers": "*"
             }
