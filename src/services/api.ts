@@ -102,6 +102,16 @@ export const uploadBook = async (
     
     console.log('Session obtained, token length:', session.access_token.length);
     
+    // Get user ID from the session
+    const userId = session.user.id;
+    if (!userId) {
+      console.error('User ID not found in session');
+      return {
+        success: false,
+        message: 'User ID not found. Please log in again.'
+      };
+    }
+    
     // Create a FormData object
     const formData = new FormData();
     formData.append('file', file);
@@ -178,6 +188,7 @@ export const uploadBook = async (
             author,
             category,
             file_url: fileUrl,
+            user_id: userId, // Add the user ID here
             status: 'uploaded',
             summary: `Processing ${title} by ${author}...`
           }
