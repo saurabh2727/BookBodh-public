@@ -1,5 +1,5 @@
 import { ChatRequest, ChatResponse, Book } from '../types';
-import { supabase } from '@/lib/supabase';
+import { supabase, getAuthHeader } from '@/lib/supabase';
 
 /**
  * Sends a chat request to the Supabase Edge Function
@@ -11,21 +11,21 @@ export const sendChatRequest = async (request: ChatRequest): Promise<ChatRespons
     console.log('Sending chat request to Supabase Edge Function');
     console.log('Request payload:', JSON.stringify(request));
     
-    // Get the current session
-    const { data: { session } } = await supabase.auth.getSession();
+    // Get the auth header
+    const authHeader = await getAuthHeader();
     
-    if (!session) {
+    if (!authHeader) {
       throw new Error('User not authenticated');
     }
     
-    console.log('Got session, access token length:', session.access_token.length);
+    console.log('Got auth header, token length:', authHeader.length);
     
     try {
       const { data, error } = await supabase.functions.invoke('chat-response', {
         method: 'POST',
         body: request,
         headers: {
-          Authorization: `Bearer ${session.access_token}`,
+          Authorization: authHeader,
         },
       });
 
@@ -80,36 +80,18 @@ export const uploadBook = async (
       };
     }
     
-    // Get the current session
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    // Get the auth header using the exported function from lib/supabase
+    const authHeader = await getAuthHeader();
     
-    if (sessionError) {
-      console.error('Session error:', sessionError);
-      return { 
-        success: false, 
-        message: `Authentication error: ${sessionError.message}` 
-      };
-    }
-    
-    if (!session) {
-      console.error('No active session found');
+    if (!authHeader) {
+      console.error('No authorization header available');
       return { 
         success: false, 
         message: 'User not authenticated. Please log in again.' 
       };
     }
     
-    console.log('Session obtained, token length:', session.access_token.length);
-    
-    // Get user ID from the session
-    const userId = session.user.id;
-    if (!userId) {
-      console.error('User ID not found in session');
-      return {
-        success: false,
-        message: 'User ID not found. Please log in again.'
-      };
-    }
+    console.log('Auth header obtained, length:', authHeader.length);
     
     // Create a FormData object
     const formData = new FormData();
@@ -126,12 +108,12 @@ export const uploadBook = async (
     });
     
     try {
-      // Call the Edge Function to handle processing
+      // Call the Edge Function with the auth header
       const { data, error: invokeError } = await supabase.functions.invoke('upload-book', {
         body: formData,
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${session.access_token}`
+          Authorization: authHeader
         }
       });
       
