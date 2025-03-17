@@ -233,8 +233,8 @@ export const fetchUserBooks = async (): Promise<Book[]> => {
       id: b.id,
       title: b.title,
       status: b.status,
-      // Use optional chaining to safely access chunks_count which might not exist in type
-      chunks_count: b?.chunks_count
+      // Type assertion to safely access chunks_count
+      chunks_count: (b as any).chunks_count
     })));
     
     return data.map(book => ({
@@ -246,7 +246,7 @@ export const fetchUserBooks = async (): Promise<Book[]> => {
       coverColor: getCoverColorByCategory(book.category),
       imageUrl: book.icon_url || undefined,
       fileUrl: book.file_url,
-      // Use optional chaining and type assertion to handle chunks_count
+      // Use type assertion to handle chunks_count
       chunksCount: (book as any).chunks_count || undefined
     }));
   } catch (error) {
