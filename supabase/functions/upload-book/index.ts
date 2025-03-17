@@ -1,7 +1,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.38.4";
-import { extract } from "https://esm.sh/pdf-parse@1.1.1";
+import pdfParse from "https://esm.sh/pdf-parse@1.1.1";
 import { corsHeaders } from "../_shared/cors.ts";
 
 // Get the chunk size from environment or use a default
@@ -13,7 +13,8 @@ const BUCKET_NAME = "books";
 async function extractTextFromPDF(pdfData: Uint8Array): Promise<string> {
   try {
     console.log("Attempting to extract text using pdf-parse...");
-    const result = await extract(pdfData);
+    // Use pdfParse as a function directly, not as a named export
+    const result = await pdfParse(pdfData);
     const text = result.text.trim();
     
     console.log(`Extracted ${text.length} characters of text`);
