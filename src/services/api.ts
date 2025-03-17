@@ -1,3 +1,4 @@
+
 import { ChatRequest, ChatResponse, Book } from '../types';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -232,7 +233,8 @@ export const fetchUserBooks = async (): Promise<Book[]> => {
       id: b.id,
       title: b.title,
       status: b.status,
-      chunks_count: b.chunks_count
+      // Use optional chaining to safely access chunks_count which might not exist in type
+      chunks_count: b?.chunks_count
     })));
     
     return data.map(book => ({
@@ -244,8 +246,8 @@ export const fetchUserBooks = async (): Promise<Book[]> => {
       coverColor: getCoverColorByCategory(book.category),
       imageUrl: book.icon_url || undefined,
       fileUrl: book.file_url,
-      status: book.status,
-      chunksCount: book.chunks_count || undefined
+      // Use optional chaining and type assertion to handle chunks_count
+      chunksCount: (book as any).chunks_count || undefined
     }));
   } catch (error) {
     console.error('Error fetching books:', error);
