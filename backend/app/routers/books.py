@@ -1,6 +1,7 @@
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks, Depends
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 import os
 import shutil
 import uuid
@@ -123,7 +124,13 @@ async def upload_book(
             content={
                 "success": True,
                 "message": f"Book '{book_title}' uploaded and processing started",
-                "filename": unique_filename
+                "filename": unique_filename,
+                "text": text  # Return the extracted text for Edge Function to use
+            },
+            headers={
+                "Access-Control-Allow-Origin": "https://ethical-wisdom-bot.lovable.app",
+                "Access-Control-Allow-Methods": "POST, OPTIONS",
+                "Access-Control-Allow-Headers": "*"
             }
         )
             

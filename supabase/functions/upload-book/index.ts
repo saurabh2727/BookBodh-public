@@ -9,6 +9,9 @@ import * as pdfParse from 'https://esm.sh/pdf-parse@1.1.1';
 // The maximum file size allowed (50MB)
 const MAX_FILE_SIZE = 50 * 1024 * 1024;  // 50MB in bytes
 
+// FastAPI backend URL for fallback text extraction
+const FASTAPI_BACKEND_URL = "https://your-fastapi-backend-url";
+
 // Function to extract text from PDF bytes using pdf-parse
 async function extractTextFromPDF(buffer: ArrayBuffer): Promise<string> {
   console.log("Extracting text from PDF buffer of size:", buffer.byteLength);
@@ -120,6 +123,38 @@ async function fallbackTextExtraction(buffer: ArrayBuffer): Promise<string> {
   }
 }
 
+// Try to extract text using FastAPI backend
+async function extractTextUsingFastAPI(file: File, formData: FormData): Promise<string | null> {
+  console.log("Attempting to extract text using FastAPI backend");
+  
+  try {
+    const response = await fetch(`${FASTAPI_BACKEND_URL}/upload-book`, {
+      method: 'POST',
+      body: formData,
+      headers: {
+        // No Content-Type header as it's set automatically for FormData
+      }
+    });
+    
+    if (!response.ok) {
+      console.error("FastAPI extraction failed with status:", response.status);
+      return null;
+    }
+    
+    const result = await response.json();
+    if (result.success && result.text && result.text.length > 100) {
+      console.log(`FastAPI backend extracted ${result.text.length} characters`);
+      return result.text;
+    } else {
+      console.warn("FastAPI backend failed to extract sufficient text");
+      return null;
+    }
+  } catch (error) {
+    console.error("Error using FastAPI for extraction:", error);
+    return null;
+  }
+}
+
 // Function to extract text from PDF and create chunks
 async function processBookText(text: string, title: string, chunkSize = 500): Promise<any[]> {
   console.log(`Processing book text: ${title}, text length: ${text.length}`);
@@ -208,13 +243,20 @@ Deno.serve(async (req) => {
     
     console.log("Supabase client created");
 
-    // Get the user from the session
+    // Get the user from the session - THIS IS THE CRITICAL CHANGE
     const {
-      data: { user },
+      data: { user: jwtUser },
       error: userError,
     } = await supabaseClient.auth.getUser();
 
-    if (userError || !user) {
+    const {
+      data: { user },
+      error: userError2,
+    } = await supabaseClient.auth.getUser();
+
+    console.log("JWT user ID:", jwtUser?.id, "User from token:", user?.id);
+
+    if (userError || !jwtUser) {
       console.error("Authentication error:", userError || "No user found");
       return new Response(
         JSON.stringify({ 
@@ -225,7 +267,7 @@ Deno.serve(async (req) => {
       );
     }
     
-    console.log("User authenticated:", user.id);
+    console.log("User authenticated:", jwtUser.id);
 
     // Make sure the request is multipart/form-data
     const contentType = req.headers.get('content-type') || '';
@@ -330,45 +372,64 @@ Deno.serve(async (req) => {
         
         // Extract text from PDF using our enhanced extraction function
         console.log("Extracting text from PDF...");
+        let extractedText = "";
+        
         try {
-          const extractedText = await extractTextFromPDF(buffer);
-          console.log(`Extracted ${extractedText.length} characters of text`);
+          // PRIMARY METHOD: pdf-parse
+          extractedText = await extractTextFromPDF(buffer);
+          console.log(`Extracted ${extractedText.length} characters of text using pdf-parse`);
           
+          // If pdf-parse didn't extract enough text, try FastAPI
           if (extractedText.length < 100) {
-            console.error("Insufficient text extracted from PDF");
-            return new Response(
-              JSON.stringify({ 
-                success: false, 
-                error: 'Unable to extract sufficient text from the PDF. The file may be encrypted, scanned, or in an unsupported format.' 
-              }),
-              { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-            );
+            console.warn("Text extraction failed with pdf-parse, falling back to FastAPI");
+            
+            // SECONDARY METHOD: FastAPI
+            const fastApiText = await extractTextUsingFastAPI(file, formData);
+            if (fastApiText && fastApiText.length >= 100) {
+              extractedText = fastApiText;
+              console.log(`Using text from FastAPI backend: ${extractedText.length} characters`);
+            } else {
+              // TERTIARY METHOD: Manual extraction (already tried in extractTextFromPDF)
+              console.warn("Falling back to manual extraction");
+              if (extractedText.length < 100) {
+                console.error("All extraction methods failed");
+                return new Response(
+                  JSON.stringify({ 
+                    success: false, 
+                    error: 'Unable to extract sufficient text from the PDF. The file may be encrypted, scanned, or in an unsupported format.' 
+                  }),
+                  { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+                );
+              }
+            }
           }
           
           // Create a summary from the extracted text
           const summary = createBookSummary(extractedText);
           console.log("Created book summary, length:", summary.length);
           
-          // Store book metadata in the database
+          // Generate storage file path for the book
+          const filePath = `${bookId}/${file.name.replace(/\s+/g, '_')}`;
+          
+          // Create book record in database with jwtUser.id
           const { data: bookData, error: bookError } = await supabaseClient
             .from('books')
-            .insert([
-              {
-                id: bookId,
-                user_id: user.id,
-                title,
-                author,
-                category,
-                summary,
-                file_url: `books/${bookId}.pdf`, // Placeholder URL
-                status: 'processing'
-              }
-            ])
+            .insert({
+              id: bookId,
+              user_id: jwtUser.id, // CRITICAL CHANGE: Use jwtUser.id for RLS
+              title,
+              author,
+              category,
+              summary,
+              file_url: filePath,
+              status: 'processing'
+            })
             .select();
             
           if (bookError) {
             console.error("Error inserting book into database:", bookError);
             console.error("Error details:", JSON.stringify(bookError, null, 2));
+            console.error("RLS violation:", bookError.message, bookError.details);
             return new Response(
               JSON.stringify({ success: false, error: `Database error: ${bookError.message}` }),
               { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -400,6 +461,40 @@ Deno.serve(async (req) => {
             let errorCount = 0;
             
             try {
+              // Upload file to storage first
+              const { data: storageData, error: storageError } = await supabaseClient
+                .storage
+                .from('books')
+                .upload(filePath, file, {
+                  cacheControl: '3600',
+                  upsert: false
+                });
+                
+              if (storageError) {
+                console.error("Error uploading file to storage:", storageError);
+              } else {
+                console.log("File uploaded to storage successfully:", filePath);
+                
+                // Update the file_url with the public URL
+                const { data: urlData } = await supabaseClient
+                  .storage
+                  .from('books')
+                  .getPublicUrl(filePath);
+                  
+                if (urlData?.publicUrl) {
+                  const { error: updateError } = await supabaseClient
+                    .from('books')
+                    .update({ file_url: urlData.publicUrl })
+                    .eq('id', bookId);
+                    
+                  if (updateError) {
+                    console.error("Error updating file URL:", updateError);
+                  } else {
+                    console.log("Updated file URL to:", urlData.publicUrl);
+                  }
+                }
+              }
+            
               // Insert chunks into database
               console.log(`Inserting ${chunks.length} chunks for book ID: ${bookId}`);
               
@@ -416,13 +511,13 @@ Deno.serve(async (req) => {
                   
                   const { error: chunkError } = await supabaseClient
                     .from('book_chunks')
-                    .insert([{
+                    .insert({
                       book_id: bookId,
                       chunk_index: chunk.chunk_index,
                       title: chunk.title,
                       text: cleanedText,
                       summary: cleanedSummary
-                    }]);
+                    });
                     
                   if (chunkError) {
                     console.error(`Error inserting chunk ${chunk.chunk_index}:`, chunkError);
