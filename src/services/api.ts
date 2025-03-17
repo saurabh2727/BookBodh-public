@@ -1,4 +1,3 @@
-
 import { ChatRequest, ChatResponse, Book } from '../types';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -246,7 +245,7 @@ export const fetchUserBooks = async (): Promise<Book[]> => {
       imageUrl: book.icon_url || undefined,
       fileUrl: book.file_url,
       status: book.status,
-      chunksCount: book.chunks_count
+      chunksCount: book.chunks_count || undefined
     }));
   } catch (error) {
     console.error('Error fetching books:', error);

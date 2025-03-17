@@ -1,4 +1,3 @@
-
 export type MessageType = 'user' | 'bot';
 
 export interface Citation {
@@ -26,6 +25,7 @@ export interface Book {
   coverColor: string;
   imageUrl?: string;
   fileUrl?: string;
+  chunksCount?: number;
 }
 
 export type BookGenre = 'Fiction' | 'Non-Fiction' | 'Philosophy' | 'Science' | 'History';

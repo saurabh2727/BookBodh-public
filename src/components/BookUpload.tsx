@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -212,7 +211,7 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
       )}
       
       {uploadSuccess && (
-        <Alert variant="success" className="bg-green-50 border-green-200">
+        <Alert variant="default" className="bg-green-50 border-green-200">
           <Check className="h-4 w-4 text-green-600" />
           <AlertTitle className="text-green-800">Success</AlertTitle>
           <AlertDescription className="text-green-700">
