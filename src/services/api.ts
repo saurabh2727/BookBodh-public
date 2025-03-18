@@ -1,4 +1,3 @@
-
 import { ChatRequest, ChatResponse, Book } from '../types';
 import { supabase, getAuthHeader, ensureAuthIsValid } from '@/lib/supabase';
 
@@ -89,7 +88,6 @@ export const uploadBook = async (
     if (!isAuthValid) {
       console.error('Auth validation failed, attempting to refresh session...');
       // Try to sign in again with the stored credentials if available
-      // This is a simplified approach - in a real app you might want to prompt the user
       await supabase.auth.refreshSession();
     }
     

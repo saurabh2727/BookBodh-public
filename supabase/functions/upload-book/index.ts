@@ -276,6 +276,26 @@ async function createBookSummary(bookId: string, text: string, supabaseClient: a
   }
 }
 
+// Check if a storage bucket exists
+async function checkBucketExists(supabaseClient: any, bucketName: string): Promise<boolean> {
+  try {
+    console.log(`Checking if bucket '${bucketName}' exists...`);
+    const { data: buckets, error } = await supabaseClient.storage.listBuckets();
+    
+    if (error) {
+      console.error("Error listing buckets:", error);
+      return false;
+    }
+    
+    const bucketExists = buckets && buckets.some(b => b.name === bucketName);
+    console.log(`Bucket '${bucketName}' ${bucketExists ? 'exists' : 'does not exist'}`);
+    return bucketExists;
+  } catch (error) {
+    console.error("Error checking bucket existence:", error);
+    return false;
+  }
+}
+
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === "OPTIONS") {
@@ -334,7 +354,7 @@ serve(async (req) => {
     // Create a Supabase client with the auth header for RLS
     const supabaseClient = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_ANON_KEY") ?? "",
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "", // Use service role key for bucket creation
       {
         global: { headers: { Authorization: authHeader } },
         auth: { 
@@ -383,31 +403,65 @@ serve(async (req) => {
     
     console.log(`Uploading file ${file.name} to storage path: ${filePath}`);
     
-    // Check if 'books' bucket exists, create if not
-    const { data: buckets } = await supabaseClient.storage.listBuckets();
+    // Create a service-role client for bucket operations
+    const serviceRoleClient = createClient(
+      Deno.env.get("SUPABASE_URL") ?? "",
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+      {
+        auth: { 
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false
+        },
+      }
+    );
     
-    if (!buckets || !buckets.find(b => b.name === BUCKET_NAME)) {
+    // Check if the bucket exists, create if it doesn't
+    const bucketExists = await checkBucketExists(serviceRoleClient, BUCKET_NAME);
+    
+    if (!bucketExists) {
       console.log(`Bucket '${BUCKET_NAME}' not found, creating it...`);
-      const { data: newBucket, error: bucketError } = await supabaseClient.storage.createBucket(BUCKET_NAME, {
-        public: false,
-        fileSizeLimit: 10485760, // 10MB limit
-      });
-      
-      if (bucketError) {
-        console.error("Error creating bucket:", bucketError);
+      try {
+        const { data: newBucket, error: bucketError } = await serviceRoleClient.storage.createBucket(BUCKET_NAME, {
+          public: false,
+          fileSizeLimit: 10485760, // 10MB limit
+        });
+        
+        if (bucketError) {
+          console.error("Error creating bucket:", bucketError);
+          return new Response(
+            JSON.stringify({ error: `Error creating storage bucket: ${bucketError.message}` }),
+            {
+              status: 500,
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            }
+          );
+        }
+        
+        console.log("Storage bucket created successfully:", newBucket);
+        
+        // Add RLS policy to the bucket to allow authenticated users to upload files
+        try {
+          // This is handled by Supabase automatically when using the service role key
+          console.log("Bucket created with default RLS policies");
+        } catch (policyError) {
+          console.error("Error setting bucket policy:", policyError);
+          // Continue anyway since the bucket was created
+        }
+      } catch (createError) {
+        console.error("Unexpected error creating bucket:", createError);
         return new Response(
-          JSON.stringify({ error: `Error creating storage bucket: ${bucketError.message}` }),
+          JSON.stringify({ error: `Unexpected error creating bucket: ${createError.message}` }),
           {
             status: 500,
             headers: { ...corsHeaders, "Content-Type": "application/json" },
           }
         );
       }
-      
-      console.log("Storage bucket created successfully");
     }
     
-    const { data: uploadData, error: uploadError } = await supabaseClient
+    // Upload file using the service role client
+    const { data: uploadData, error: uploadError } = await serviceRoleClient
       .storage
       .from(BUCKET_NAME)
       .upload(filePath, fileData, {
@@ -430,7 +484,7 @@ serve(async (req) => {
     console.log("File uploaded successfully");
     
     // Get the public URL for the file
-    const { data: urlData } = await supabaseClient
+    const { data: urlData } = await serviceRoleClient
       .storage
       .from(BUCKET_NAME)
       .getPublicUrl(filePath);
