@@ -1,4 +1,3 @@
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.38.4";
 import { decode } from "https://deno.land/x/djwt@v3.0.1/mod.ts";
@@ -52,8 +51,74 @@ async function decodeJWT(token) {
 }
 
 /**
+ * Checks if text is human-readable by evaluating several metrics
+ * 
+ * @param {string} text - The text to evaluate
+ * @returns {boolean} - Whether the text is likely human-readable
+ */
+function isHumanReadable(text: string): boolean {
+  if (!text || text.length < 50) {
+    return false;
+  }
+  
+  // Test 1: Check for reasonable word to character ratio (expecting spaces between words)
+  const words = text.split(/\s+/).filter(w => w.length > 0);
+  const wordToCharRatio = words.length / text.length;
+  
+  // In most human languages, we expect around 0.15-0.2 ratio (1 word per ~5-7 characters)
+  if (wordToCharRatio < 0.05) {
+    console.log("Text failed word-to-character ratio test:", wordToCharRatio);
+    return false;
+  }
+  
+  // Test 2: Check for reasonable distribution of characters
+  const letterCount = (text.match(/[a-zA-Z]/g) || []).length;
+  const letterRatio = letterCount / text.length;
+  
+  // Human text usually has >40% letters
+  if (letterRatio < 0.3) {
+    console.log("Text failed letter ratio test:", letterRatio);
+    return false;
+  }
+  
+  // Test 3: Check for excessive special characters and unusual symbols
+  const specialChars = (text.match(/[^a-zA-Z0-9\s.,;:!?'"()\-]/g) || []).length;
+  const specialCharRatio = specialChars / text.length;
+  
+  if (specialCharRatio > 0.3) {
+    console.log("Text failed special character test:", specialCharRatio);
+    return false;
+  }
+  
+  // Test 4: Check for reasonable sentence structure (periods, question marks, etc.)
+  const sentences = text.match(/[.!?]+\s+[A-Z0-9"'(]/g);
+  if (!sentences && text.length > 200) {
+    console.log("Text failed sentence structure test");
+    return false;
+  }
+  
+  // Test 5: Check for common words that appear in most texts
+  const commonWords = ['the', 'a', 'an', 'and', 'or', 'but', 'is', 'are', 'was', 'were', 'to', 'of', 'in', 'for', 'with', 'on', 'at'];
+  let commonWordCount = 0;
+  
+  for (const word of commonWords) {
+    if (text.toLowerCase().includes(` ${word} `)) {
+      commonWordCount++;
+    }
+  }
+  
+  if (commonWordCount < 3 && text.length > 200) {
+    console.log("Text failed common word test:", commonWordCount);
+    return false;
+  }
+  
+  console.log("Text passed readability checks");
+  return true;
+}
+
+/**
  * Improved text extraction from PDF data using pattern matching
- * This is a more robust approach than the previous attempt
+ * with enhanced readability checks
  */
 async function extractTextFromPDF(pdfData: Uint8Array): Promise<string> {
   console.log("Starting enhanced text extraction process");
@@ -73,13 +138,14 @@ async function extractTextFromPDF(pdfData: Uint8Array): Promise<string> {
     const textStreamMatches = rawText.match(/stream\s+([\s\S]+?)\s+endstream/g) || [];
     console.log(`Found ${textStreamMatches.length} text streams in PDF`);
     
+    // Primary extraction method - from text streams containing TJ or Tj operators
     for (const streamMatch of textStreamMatches) {
       // Process each stream to extract readable text
-      // Focus only on streams with text content (TJ, Tj operators)
       if (streamMatch.includes("TJ") || streamMatch.includes("Tj")) {
         // Extract text within parentheses (typical PDF text format)
         const textPartsMatch = streamMatch.match(/\((.*?)\)/g) || [];
         
+        let streamText = "";
         for (const textPart of textPartsMatch) {
           // Remove the parentheses and decode escape sequences
           let cleanedText = textPart.substring(1, textPart.length - 1)
@@ -93,41 +159,73 @@ async function extractTextFromPDF(pdfData: Uint8Array): Promise<string> {
             
           // Only add if it's printable text (not control codes)
           if (/[a-zA-Z0-9.,;:!?' ]/.test(cleanedText)) {
-            extractedText += cleanedText + " ";
+            streamText += cleanedText + " ";
           }
+        }
+        
+        if (streamText.trim().length > 0) {
+          extractedText += streamText + " ";
         }
       }
     }
     
+    // Check if primary extraction yielded readable text
+    if (extractedText.trim().length >= 100 && isHumanReadable(extractedText)) {
+      console.log("Primary extraction method succeeded with readable text");
+      return cleanText(extractedText);
+    }
+    
+    console.log("Primary extraction method yielded insufficient results, trying secondary method");
+    
     // Secondary extraction method: Looking for normal text patterns
-    if (extractedText.trim().length < 100) {
-      console.log("Primary extraction method yielded insufficient results, trying secondary method");
+    let secondaryText = "";
+    
+    // Try to extract any text-like content with reasonable length
+    const textLikePattern = /[a-zA-Z0-9][a-zA-Z0-9.,;:!?' ]{10,}/g;
+    const textMatches = rawText.match(textLikePattern) || [];
+    
+    console.log(`Found ${textMatches.length} potential text segments using secondary method`);
+    
+    // Filter out segments that are clearly not natural text
+    const validTextSegments = textMatches
+      .filter(segment => {
+        // Check if segment has a reasonable word-to-character ratio
+        const words = segment.split(/\s+/).filter(w => w.length > 0);
+        return (words.length / segment.length) > 0.05; // Reasonable text has spaces
+      })
+      .filter(segment => {
+        // Filter out segments with too many special characters
+        const specialCharCount = (segment.match(/[^a-zA-Z0-9.,;:!?' ]/g) || []).length;
+        return (specialCharCount / segment.length) < 0.2; // Less than 20% special chars
+      });
+    
+    secondaryText = validTextSegments.join(" ");
+    
+    // Check if secondary extraction yielded readable text
+    if (secondaryText.trim().length >= 100 && isHumanReadable(secondaryText)) {
+      console.log("Secondary extraction method succeeded with readable text");
+      return cleanText(secondaryText);
+    }
+    
+    // Tertiary method: Try to find the longest consecutive text blocks
+    console.log("Secondary extraction methods failed, trying tertiary method");
+    const tertiaryPattern = /[A-Z][a-zA-Z ,.!?;:'\-"]{50,}/g;
+    const tertiaryMatches = rawText.match(tertiaryPattern) || [];
+    
+    if (tertiaryMatches.length > 0) {
+      // Sort by length (descending) and take the top segments
+      tertiaryMatches.sort((a, b) => b.length - a.length);
+      const topSegments = tertiaryMatches.slice(0, 20).join(" ");
       
-      // Try to extract any text-like content with reasonable length
-      const textLikePattern = /[a-zA-Z0-9][a-zA-Z0-9.,;:!?' ]{10,}/g;
-      const textMatches = rawText.match(textLikePattern) || [];
-      
-      console.log(`Found ${textMatches.length} potential text segments using secondary method`);
-      
-      // Filter out segments that are clearly not natural text
-      const validTextSegments = textMatches
-        .filter(segment => {
-          // Check if segment has a reasonable word-to-character ratio
-          const words = segment.split(/\s+/).filter(w => w.length > 0);
-          return (words.length / segment.length) > 0.05; // Reasonable text has spaces
-        })
-        .filter(segment => {
-          // Filter out segments with too many special characters
-          const specialCharCount = (segment.match(/[^a-zA-Z0-9.,;:!?' ]/g) || []).length;
-          return (specialCharCount / segment.length) < 0.2; // Less than 20% special chars
-        });
-      
-      extractedText += validTextSegments.join(" ");
+      if (topSegments.length >= 100 && isHumanReadable(topSegments)) {
+        console.log("Tertiary extraction method succeeded with readable text");
+        return cleanText(topSegments);
+      }
     }
     
     // Fallback: Use FastAPI backend if available and our extraction failed
-    if (extractedText.trim().length < 100 && FASTAPI_BACKEND_URL) {
-      console.log("Local extraction methods failed, trying FastAPI backend");
+    if (FASTAPI_BACKEND_URL) {
+      console.log("All local extraction methods failed, trying FastAPI backend");
       
       try {
         const formData = new FormData();
@@ -140,31 +238,29 @@ async function extractTextFromPDF(pdfData: Uint8Array): Promise<string> {
         
         if (response.ok) {
           const result = await response.json();
-          if (result.text && result.text.length > 100) {
-            console.log("FastAPI extraction successful");
-            return result.text;
+          if (result.text && result.text.length > 100 && isHumanReadable(result.text)) {
+            console.log("FastAPI extraction successful with readable text");
+            return cleanText(result.text);
           }
         }
       } catch (backendError) {
         console.error("FastAPI backend extraction failed:", backendError);
-        // Continue with our local extraction results
       }
     }
     
-    // Final clean-up of extracted text
-    extractedText = extractedText
-      .replace(/\s+/g, " ")  // Normalize whitespace
-      .trim();
+    // If all methods failed but we have some text (even if not ideal), return the best we have
+    const bestAttempt = [extractedText, secondaryText, tertiaryMatches.join(" ")].sort(
+      (a, b) => b.length - a.length
+    )[0];
     
-    console.log(`Extracted ${extractedText.length} characters of text`);
-    
-    if (extractedText.length < 50) {
-      console.warn("Warning: Very little text was extracted from the PDF");
-      // Create a minimal placeholder text with information about the document
-      return `This document appears to contain minimal extractable text. It may be a scanned document or have security settings that prevent text extraction. Document size: ${pdfData.length} bytes.`;
+    if (bestAttempt && bestAttempt.trim().length > 50) {
+      console.log("All extraction methods failed quality checks, returning best effort text");
+      return cleanText(bestAttempt) + "\n\nNote: The text extraction quality for this document was suboptimal. The content may not be complete or correctly formatted.";
     }
     
-    return extractedText;
+    // Create a placeholder if we couldn't extract anything usable
+    console.warn("Warning: Unable to extract readable text from the PDF");
+    return `This document appears to be a PDF that contains minimal extractable text or the text is in a format that prevents reliable extraction. It may be a scanned document, an image-based PDF, or have security settings that prevent text extraction. Document size: ${pdfData.length} bytes.`;
   } catch (error) {
     console.error("Error in text extraction:", error);
     return `Failed to extract text: ${error.message}. This document may be encrypted, a scanned image, or have security settings that prevent text extraction.`;
