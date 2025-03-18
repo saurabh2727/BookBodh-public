@@ -21,6 +21,7 @@ const Login = () => {
   useEffect(() => {
     const { data: authListener } = supabase.auth.onAuthStateChange(
       (event, session) => {
+        console.log('Login page - Auth state changed:', event, 'Session:', !!session);
         if (session?.user) {
           setUser(session.user);
           navigate('/');
@@ -34,6 +35,7 @@ const Login = () => {
     const checkUser = async () => {
       const { data } = await supabase.auth.getSession();
       if (data.session?.user) {
+        console.log('Login page - Existing session found, redirecting to home');
         navigate('/');
       }
     };
@@ -95,6 +97,7 @@ const Login = () => {
     
     try {
       setLoading(true);
+      console.log('Attempting sign in with email:', email);
       const { error } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -103,7 +106,9 @@ const Login = () => {
       if (error) throw error;
       
       // Navigate happens in the auth state change listener
+      console.log('Sign in successful');
     } catch (error: any) {
+      console.error('Login error:', error);
       toast({
         title: "Login failed",
         description: error.message,

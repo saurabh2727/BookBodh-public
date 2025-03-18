@@ -19,7 +19,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   }
 });
 
-// Enhanced getAuthHeader function with better logging
+// Enhanced getAuthHeader function with better logging and error handling
 export const getAuthHeader = async () => {
   try {
     console.log('Getting auth header from session...');
