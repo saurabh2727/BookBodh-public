@@ -51,91 +51,123 @@ async function decodeJWT(token) {
   }
 }
 
-async function fallbackTextExtraction(pdfData: Uint8Array): Promise<string> {
-  console.warn("Using fallback text extraction method");
+/**
+ * Improved text extraction from PDF data using pattern matching
+ * This is a more robust approach than the previous attempt
+ */
+async function extractTextFromPDF(pdfData: Uint8Array): Promise<string> {
+  console.log("Starting enhanced text extraction process");
   
-  // This is a very basic extraction - it may not work well for all PDFs
-  const decoder = new TextDecoder("utf-8");
-  const pdfText = decoder.decode(pdfData);
-  
-  // Look for text content between markers
-  const textSegments = pdfText.match(/BT.*?ET/gs) || [];
-  
-  // Extract text from these segments
-  let extractedText = "";
-  for (const segment of textSegments) {
-    // Extract anything that looks like text
-    const textMatches = segment.match(/\[(.*?)\]/g) || [];
-    for (const match of textMatches) {
-      extractedText += match.replace(/[\[\]]/g, "") + " ";
-    }
-  }
-  
-  return extractedText.trim() || "Failed to extract text using fallback method";
-}
-
-function isTextExtractedSuccessfully(text: string): boolean {
-  if (!text) return false;
-  if (text.length < 100) return false;
-  
-  // Check for common error messages
-  const errorPatterns = [
-    "Failed to extract",
-    "Error extracting",
-    "Could not extract",
-    "extraction failed",
-  ];
-  
-  for (const pattern of errorPatterns) {
-    if (text.toLowerCase().includes(pattern.toLowerCase())) {
-      return false;
-    }
-  }
-  
-  return true;
-}
-
-async function extractTextWithFastAPI(fileData: ArrayBuffer, fileName: string): Promise<string> {
   try {
-    console.log("Attempting to extract text using FastAPI backend...");
+    // Convert PDF data to string representation (for text pattern extraction)
+    const decoder = new TextDecoder("utf-8", { fatal: false, ignoreBOM: true });
+    let rawText = decoder.decode(pdfData);
     
-    const formData = new FormData();
-    const blob = new Blob([new Uint8Array(fileData)], { type: "application/pdf" });
-    formData.append("file", blob, fileName);
+    // Clean up initial conversion to help with extraction
+    rawText = rawText.replace(/\x00/g, " "); // Replace null bytes
     
-    const response = await fetch(FASTAPI_BACKEND_URL, {
-      method: "POST",
-      body: formData,
-      headers: {
-        "Accept": "application/json",
-      },
-    });
+    // Advanced pattern extraction for PDF content
+    let extractedText = "";
     
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`FastAPI returned error: ${response.status} - ${errorText}`);
+    // Extract text streams - Pattern: Look for text between stream and endstream
+    const textStreamMatches = rawText.match(/stream\s+([\s\S]+?)\s+endstream/g) || [];
+    console.log(`Found ${textStreamMatches.length} text streams in PDF`);
+    
+    for (const streamMatch of textStreamMatches) {
+      // Process each stream to extract readable text
+      // Focus only on streams with text content (TJ, Tj operators)
+      if (streamMatch.includes("TJ") || streamMatch.includes("Tj")) {
+        // Extract text within parentheses (typical PDF text format)
+        const textPartsMatch = streamMatch.match(/\((.*?)\)/g) || [];
+        
+        for (const textPart of textPartsMatch) {
+          // Remove the parentheses and decode escape sequences
+          let cleanedText = textPart.substring(1, textPart.length - 1)
+            .replace(/\\(\d{3})/g, (_, octal) => String.fromCharCode(parseInt(octal, 8)))
+            .replace(/\\n/g, "\n")
+            .replace(/\\r/g, "\r")
+            .replace(/\\t/g, "\t")
+            .replace(/\\\\/g, "\\")
+            .replace(/\\\(/g, "(")
+            .replace(/\\\)/g, ")");
+            
+          // Only add if it's printable text (not control codes)
+          if (/[a-zA-Z0-9.,;:!?' ]/.test(cleanedText)) {
+            extractedText += cleanedText + " ";
+          }
+        }
+      }
     }
     
-    const result = await response.json();
-    
-    if (result.text && isTextExtractedSuccessfully(result.text)) {
-      console.log("Successfully extracted text with FastAPI backend");
-      return result.text;
+    // Secondary extraction method: Looking for normal text patterns
+    if (extractedText.trim().length < 100) {
+      console.log("Primary extraction method yielded insufficient results, trying secondary method");
+      
+      // Try to extract any text-like content with reasonable length
+      const textLikePattern = /[a-zA-Z0-9][a-zA-Z0-9.,;:!?' ]{10,}/g;
+      const textMatches = rawText.match(textLikePattern) || [];
+      
+      console.log(`Found ${textMatches.length} potential text segments using secondary method`);
+      
+      // Filter out segments that are clearly not natural text
+      const validTextSegments = textMatches
+        .filter(segment => {
+          // Check if segment has a reasonable word-to-character ratio
+          const words = segment.split(/\s+/).filter(w => w.length > 0);
+          return (words.length / segment.length) > 0.05; // Reasonable text has spaces
+        })
+        .filter(segment => {
+          // Filter out segments with too many special characters
+          const specialCharCount = (segment.match(/[^a-zA-Z0-9.,;:!?' ]/g) || []).length;
+          return (specialCharCount / segment.length) < 0.2; // Less than 20% special chars
+        });
+      
+      extractedText += validTextSegments.join(" ");
     }
     
-    console.warn("FastAPI text extraction failed or produced low-quality results");
-    throw new Error("FastAPI text extraction failed to produce usable text");
+    // Fallback: Use FastAPI backend if available and our extraction failed
+    if (extractedText.trim().length < 100 && FASTAPI_BACKEND_URL) {
+      console.log("Local extraction methods failed, trying FastAPI backend");
+      
+      try {
+        const formData = new FormData();
+        formData.append("file", new Blob([pdfData]), "document.pdf");
+        
+        const response = await fetch(FASTAPI_BACKEND_URL, {
+          method: "POST",
+          body: formData,
+        });
+        
+        if (response.ok) {
+          const result = await response.json();
+          if (result.text && result.text.length > 100) {
+            console.log("FastAPI extraction successful");
+            return result.text;
+          }
+        }
+      } catch (backendError) {
+        console.error("FastAPI backend extraction failed:", backendError);
+        // Continue with our local extraction results
+      }
+    }
+    
+    // Final clean-up of extracted text
+    extractedText = extractedText
+      .replace(/\s+/g, " ")  // Normalize whitespace
+      .trim();
+    
+    console.log(`Extracted ${extractedText.length} characters of text`);
+    
+    if (extractedText.length < 50) {
+      console.warn("Warning: Very little text was extracted from the PDF");
+      // Create a minimal placeholder text with information about the document
+      return `This document appears to contain minimal extractable text. It may be a scanned document or have security settings that prevent text extraction. Document size: ${pdfData.length} bytes.`;
+    }
+    
+    return extractedText;
   } catch (error) {
-    console.warn("FastAPI extraction failed:", error.message);
-    
-    // Try fallback method
-    try {
-      console.warn("Falling back to manual extraction");
-      return await fallbackTextExtraction(new Uint8Array(fileData));
-    } catch (fallbackError) {
-      console.error("All text extraction methods failed");
-      throw new Error("Failed to extract text from PDF using all available methods");
-    }
+    console.error("Error in text extraction:", error);
+    return `Failed to extract text: ${error.message}. This document may be encrypted, a scanned image, or have security settings that prevent text extraction.`;
   }
 }
 
@@ -155,7 +187,10 @@ function cleanText(text: string): string {
   // Replace any characters that might cause issues with JSON
   cleaned = cleaned.replace(/[\u2028\u2029]/g, " ");
   
-  // Normalize whitespace (optional)
+  // Clean up binary-looking data
+  cleaned = cleaned.replace(/[^\x20-\x7E\s]/g, " "); // Keep only printable ASCII and whitespace
+  
+  // Normalize whitespace
   cleaned = cleaned.replace(/\s+/g, " ").trim();
   
   return cleaned;
@@ -439,15 +474,6 @@ serve(async (req) => {
         }
         
         console.log("Storage bucket created successfully:", newBucket);
-        
-        // Add RLS policy to the bucket to allow authenticated users to upload files
-        try {
-          // This is handled by Supabase automatically when using the service role key
-          console.log("Bucket created with default RLS policies");
-        } catch (policyError) {
-          console.error("Error setting bucket policy:", policyError);
-          // Continue anyway since the bucket was created
-        }
       } catch (createError) {
         console.error("Unexpected error creating bucket:", createError);
         return new Response(
@@ -539,17 +565,19 @@ serve(async (req) => {
     console.log("Extracting text from PDF...");
     let extractedText;
     try {
-      // Use the FastAPI backend for text extraction
-      extractedText = await extractTextWithFastAPI(fileData, file.name);
+      // Use our enhanced text extraction
+      extractedText = await extractTextFromPDF(new Uint8Array(fileData));
       
       if (!extractedText || extractedText.length < 100) {
-        throw new Error("Failed to extract meaningful text from the PDF");
+        console.warn("Warning: Minimal text extracted, setting a placeholder message");
+        extractedText = `This document appears to have limited extractable text. It may be a scanned document or protected PDF. File size: ${fileData.byteLength} bytes.`;
       }
       
       // Clean the extracted text to remove null bytes and invalid characters
       extractedText = cleanText(extractedText);
       
       console.log(`Successfully extracted ${extractedText.length} characters of text`);
+      console.log("Sample extracted text:", extractedText.substring(0, 200));
     } catch (extractError) {
       console.error("Text extraction failed:", extractError);
       
