@@ -1,7 +1,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.38.4";
-import { decode, verify } from "https://deno.land/x/djwt@v3.0.1/mod.ts";
+import { decode } from "https://deno.land/x/djwt@v3.0.1/mod.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 
 // Get the chunk size from environment or use a default
@@ -139,6 +139,28 @@ async function extractTextWithFastAPI(fileData: ArrayBuffer, fileName: string): 
   }
 }
 
+// Function to clean text by removing null bytes and invalid Unicode characters
+function cleanText(text: string): string {
+  if (!text) return "";
+  
+  // Remove null bytes
+  let cleaned = text.replace(/\u0000/g, "");
+  
+  // Replace other problematic characters
+  cleaned = cleaned.replace(/[\uD800-\uDFFF]/g, ""); // Remove unpaired surrogates
+  
+  // Replace control characters except common whitespace chars
+  cleaned = cleaned.replace(/[\u0001-\u0008\u000B-\u000C\u000E-\u001F\u007F-\u009F]/g, "");
+  
+  // Replace any characters that might cause issues with JSON
+  cleaned = cleaned.replace(/[\u2028\u2029]/g, " ");
+  
+  // Normalize whitespace (optional)
+  cleaned = cleaned.replace(/\s+/g, " ").trim();
+  
+  return cleaned;
+}
+
 function chunkText(text: string): string[] {
   // Split text into sentences
   const sentences = text.replace(/([.?!])\s*(?=[A-Z])/g, "$1|").split("|");
@@ -174,38 +196,53 @@ function chunkText(text: string): string[] {
 }
 
 async function processBookText(bookId: string, title: string, text: string, supabaseClient: any, userId: string): Promise<number> {
+  // First clean the text to remove problematic characters
+  const cleanedText = cleanText(text);
+  
   // Split the text into chunks
-  const chunks = chunkText(text);
+  const chunks = chunkText(cleanedText);
   console.log(`Split book into ${chunks.length} chunks`);
   
   // Insert chunks into the database
   const chunkPromises = chunks.map(async (chunkText, index) => {
-    const { data: chunkData, error: chunkError } = await supabaseClient
-      .from("book_chunks")
-      .insert({
-        book_id: bookId,
-        chunk_index: index,
-        title: title,
-        text: chunkText,
-      });
-    
-    if (chunkError) {
-      console.error(`Error storing chunk ${index}:`, chunkError);
-      throw chunkError;
+    try {
+      // Clean the chunk text again just to be sure
+      const sanitizedChunkText = cleanText(chunkText);
+      
+      const { data: chunkData, error: chunkError } = await supabaseClient
+        .from("book_chunks")
+        .insert({
+          book_id: bookId,
+          chunk_index: index,
+          title: title,
+          text: sanitizedChunkText,
+        });
+      
+      if (chunkError) {
+        console.error(`Error storing chunk ${index}:`, chunkError);
+        throw chunkError;
+      }
+      
+      return chunkData;
+    } catch (err) {
+      console.error(`Failed to insert chunk ${index}:`, err);
+      // Continue with other chunks even if one fails
+      return null;
     }
-    
-    return chunkData;
   });
   
   // Wait for all chunks to be processed
-  await Promise.all(chunkPromises);
+  const results = await Promise.allSettled(chunkPromises);
+  
+  // Count successful insertions
+  const successfulChunks = results.filter(r => r.status === "fulfilled" && r.value !== null).length;
   
   // Update book with chunks count
   const { error: updateError } = await supabaseClient
     .from("books")
     .update({ 
-      status: "processed",
-      chunks_count: chunks.length 
+      status: successfulChunks > 0 ? "processed" : "error",
+      chunks_count: successfulChunks 
     })
     .eq("id", bookId);
   
@@ -214,13 +251,14 @@ async function processBookText(bookId: string, title: string, text: string, supa
     throw updateError;
   }
   
-  return chunks.length;
+  return successfulChunks;
 }
 
 async function createBookSummary(bookId: string, text: string, supabaseClient: any): Promise<void> {
   try {
-    // For now, just create a simple summary (first 500 chars + ...)
-    const simpleSummary = text.substring(0, 500) + (text.length > 500 ? "..." : "");
+    // Create a simple summary (first 500 chars + ...)
+    const cleanedText = cleanText(text);
+    const simpleSummary = cleanedText.substring(0, 500) + (cleanedText.length > 500 ? "..." : "");
     
     // Update the book with the summary
     const { error: summaryError } = await supabaseClient
@@ -428,6 +466,9 @@ serve(async (req) => {
       if (!extractedText || extractedText.length < 100) {
         throw new Error("Failed to extract meaningful text from the PDF");
       }
+      
+      // Clean the extracted text to remove null bytes and invalid characters
+      extractedText = cleanText(extractedText);
       
       console.log(`Successfully extracted ${extractedText.length} characters of text`);
     } catch (extractError) {
