@@ -51,6 +51,7 @@ export type Database = {
         Row: {
           author: string
           category: string
+          chunks_count: number | null
           created_at: string
           file_url: string
           icon_url: string | null
@@ -63,6 +64,7 @@ export type Database = {
         Insert: {
           author: string
           category: string
+          chunks_count?: number | null
           created_at?: string
           file_url: string
           icon_url?: string | null
@@ -75,6 +77,7 @@ export type Database = {
         Update: {
           author?: string
           category?: string
+          chunks_count?: number | null
           created_at?: string
           file_url?: string
           icon_url?: string | null

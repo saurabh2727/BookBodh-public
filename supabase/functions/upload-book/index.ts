@@ -383,6 +383,30 @@ serve(async (req) => {
     
     console.log(`Uploading file ${file.name} to storage path: ${filePath}`);
     
+    // Check if 'books' bucket exists, create if not
+    const { data: buckets } = await supabaseClient.storage.listBuckets();
+    
+    if (!buckets || !buckets.find(b => b.name === BUCKET_NAME)) {
+      console.log(`Bucket '${BUCKET_NAME}' not found, creating it...`);
+      const { data: newBucket, error: bucketError } = await supabaseClient.storage.createBucket(BUCKET_NAME, {
+        public: false,
+        fileSizeLimit: 10485760, // 10MB limit
+      });
+      
+      if (bucketError) {
+        console.error("Error creating bucket:", bucketError);
+        return new Response(
+          JSON.stringify({ error: `Error creating storage bucket: ${bucketError.message}` }),
+          {
+            status: 500,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
+      
+      console.log("Storage bucket created successfully");
+    }
+    
     const { data: uploadData, error: uploadError } = await supabaseClient
       .storage
       .from(BUCKET_NAME)
@@ -426,7 +450,8 @@ serve(async (req) => {
         file_url: fileUrl,
         user_id: userId, // Use extracted userId from JWT token
         status: "uploading",
-        summary: `Processing ${title}...`
+        summary: `Processing ${title}...`,
+        chunks_count: 0 // Initialize with zero chunks
       })
       .select();
     
@@ -537,7 +562,8 @@ serve(async (req) => {
         success: true,
         message: `Book "${title}" uploaded and processed successfully`,
         bookId,
-        fileUrl
+        fileUrl,
+        chunksCount: 0 // Initial count, will be updated asynchronously
       }),
       {
         status: 200,

@@ -107,7 +107,7 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
       if (result.success) {
         setUploadSuccess(true);
         setBookId(result.bookId || null);
-        setChunksCount(result.chunksCount || null);
+        setChunksCount(result.chunksCount || 0);
         
         toast({
           title: "Book uploaded successfully",
@@ -120,7 +120,7 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
         if (result.bookId) {
           successMessage += `, ID: ${result.bookId}`;
         }
-        if (result.chunksCount) {
+        if (result.chunksCount !== undefined) {
           successMessage += `, ${result.chunksCount} chunks created`;
         }
         
