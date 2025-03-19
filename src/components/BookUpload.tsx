@@ -10,10 +10,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Loader2, AlertCircle, Check } from 'lucide-react';
-import { uploadBook } from '@/services/api';
+import { Loader2, AlertCircle, Check, Search } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { toast } from "@/hooks/use-toast";
+import { supabase } from '@/lib/supabase';
 
 interface BookUploadProps {
   onClose: () => void;
@@ -21,197 +21,256 @@ interface BookUploadProps {
 }
 
 const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
-  const [file, setFile] = useState<File | null>(null);
-  const [title, setTitle] = useState('');
-  const [author, setAuthor] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [category, setCategory] = useState<string>('Non-Fiction');
-  const [isUploading, setIsUploading] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detailedError, setDetailedError] = useState<string | null>(null);
   const [uploadSuccess, setUploadSuccess] = useState(false);
   const [bookId, setBookId] = useState<string | null>(null);
-  const [chunksCount, setChunksCount] = useState<number | null>(null);
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [selectedBook, setSelectedBook] = useState<any | null>(null);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0];
-    
-    if (selectedFile) {
-      console.log(`Selected file: ${selectedFile.name}, size: ${selectedFile.size}, type: ${selectedFile.type}`);
-      
-      // Validate file is a PDF
-      if (!selectedFile.type.includes('pdf') && !selectedFile.name.toLowerCase().endsWith('.pdf')) {
-        setError('Please select a PDF file');
-        setFile(null);
-        return;
-      }
-      
-      setFile(selectedFile);
-      setError(null);
-      setDetailedError(null);
-      setUploadSuccess(false);
-      setBookId(null);
-      setChunksCount(null);
-      
-      // Try to extract title from filename if not set
-      if (!title) {
-        const filename = selectedFile.name.replace(/\.[^/.]+$/, ""); // Remove extension
-        const cleanedTitle = filename
-          .replace(/[_-]/g, " ")   // Replace underscores and dashes with spaces
-          .replace(/\s{2,}/g, " ") // Replace multiple spaces with a single space
-          .trim();                 // Remove leading and trailing spaces
-        
-        setTitle(cleanedTitle);
-      }
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!file) {
-      setError('Please select a file');
-      return;
-    }
-    
-    if (!title) {
-      setError('Title is required');
-      return;
-    }
-    
-    if (!author) {
-      setError('Author is required');
+    if (!searchQuery.trim()) {
+      setError('Please enter a search query');
       return;
     }
     
     try {
-      setIsUploading(true);
+      setIsSearching(true);
       setError(null);
       setDetailedError(null);
       setUploadSuccess(false);
       setBookId(null);
-      setChunksCount(null);
+      setSearchResults([]);
+      setSelectedBook(null);
       
-      console.log('Uploading book with details:', {
-        title,
-        author,
-        category,
-        fileSize: file.size,
-        fileType: file.type
+      console.log('Searching for books with query:', searchQuery);
+      
+      // Use the Edge Function to search for books
+      const { data, error } = await supabase.functions.invoke('search-books', {
+        method: 'POST',
+        body: { query: searchQuery },
       });
+
+      if (error) {
+        console.error('Edge function error:', error);
+        throw new Error(error.message || 'Error searching for books');
+      }
+
+      console.log('Search results:', data);
       
-      // We're using the edge function for upload, so no need to create bucket here
-      const result = await uploadBook(file, title, author, category);
-      
-      console.log('Upload result:', result);
-      
-      if (result.success) {
-        setUploadSuccess(true);
-        setBookId(result.bookId || null);
-        setChunksCount(result.chunksCount || 0);
-        
-        toast({
-          title: "Book uploaded successfully",
-          description: `"${title}" has been uploaded and is being processed.`,
-          variant: "default",
-        });
-        
-        // Enhanced success message with book ID and chunks count
-        let successMessage = `Book "${title}" uploaded successfully`;
-        if (result.bookId) {
-          successMessage += `, ID: ${result.bookId}`;
-        }
-        if (result.chunksCount !== undefined) {
-          successMessage += `, ${result.chunksCount} chunks created`;
-        }
-        
-        onUploadComplete(true, successMessage, result.bookId);
+      if (data && Array.isArray(data.items) && data.items.length > 0) {
+        setSearchResults(data.items);
       } else {
-        setError(result.message || 'Upload failed. Please try again.');
-        toast({
-          title: "Upload failed",
-          description: result.message || 'Please try again.',
-          variant: "destructive",
-        });
-        onUploadComplete(false, result.message || 'Upload failed. Please try again.');
+        setError('No books found. Try a different search term.');
       }
     } catch (error) {
-      console.error('Error uploading book:', error);
+      console.error('Book search error:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      setError('Upload failed. Please try again.');
+      setError('Search failed. Please try again.');
       setDetailedError(errorMessage);
       
       toast({
-        title: "Upload error",
+        title: "Search error",
+        description: "An unexpected error occurred. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleSelectBook = (book: any) => {
+    setSelectedBook(book);
+    
+    // Extract book details
+    const title = book.volumeInfo.title;
+    const authors = book.volumeInfo.authors || ['Unknown Author'];
+    
+    toast({
+      title: "Book selected",
+      description: `${title} by ${authors.join(', ')}`,
+    });
+  };
+
+  const handleAddBook = async () => {
+    if (!selectedBook) {
+      setError('Please select a book first');
+      return;
+    }
+    
+    try {
+      setIsSearching(true);
+      setError(null);
+      setDetailedError(null);
+      
+      console.log('Adding book to library:', selectedBook.volumeInfo.title);
+      
+      // Use the Edge Function to add the book
+      const { data, error } = await supabase.functions.invoke('add-book', {
+        method: 'POST',
+        body: { 
+          bookId: selectedBook.id,
+          title: selectedBook.volumeInfo.title,
+          authors: selectedBook.volumeInfo.authors || ['Unknown Author'],
+          category: category,
+          previewLink: selectedBook.volumeInfo.previewLink
+        },
+      });
+
+      if (error) {
+        console.error('Edge function error:', error);
+        throw new Error(error.message || 'Error adding book');
+      }
+
+      console.log('Book added:', data);
+      
+      if (data.success) {
+        setUploadSuccess(true);
+        setBookId(data.bookId || null);
+        
+        toast({
+          title: "Book added successfully",
+          description: `"${selectedBook.volumeInfo.title}" has been added to your library.`,
+          variant: "default",
+        });
+        
+        onUploadComplete(true, `Book "${selectedBook.volumeInfo.title}" added successfully`, data.bookId);
+      } else {
+        throw new Error(data.message || 'Failed to add book');
+      }
+    } catch (error) {
+      console.error('Book add error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      setError('Failed to add book. Please try again.');
+      setDetailedError(errorMessage);
+      
+      toast({
+        title: "Add book error",
         description: "An unexpected error occurred. Please try again.",
         variant: "destructive",
       });
       
       onUploadComplete(false, errorMessage);
     } finally {
-      setIsUploading(false);
+      setIsSearching(false);
     }
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div>
-        <Label htmlFor="file">PDF File</Label>
-        <Input 
-          id="file" 
-          type="file" 
-          onChange={handleFileChange} 
-          accept="application/pdf,.pdf"
-          className="mt-1"
-          disabled={isUploading || uploadSuccess}
-        />
-        {!file && <p className="text-xs text-muted-foreground mt-1">Select a PDF file to upload</p>}
-        {file && <p className="text-xs text-muted-foreground mt-1">Selected: {file.name}</p>}
-      </div>
+    <div className="space-y-4">
+      <form onSubmit={handleSearch} className="space-y-4">
+        <div>
+          <Label htmlFor="search">Search for a Book</Label>
+          <div className="flex gap-2 mt-1">
+            <Input 
+              id="search" 
+              value={searchQuery} 
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Enter book title or author"
+              className="flex-1"
+              disabled={isSearching || uploadSuccess}
+            />
+            <Button 
+              type="submit" 
+              disabled={isSearching || uploadSuccess}
+              size="icon"
+            >
+              {isSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">Search for books by title, author, or ISBN</p>
+        </div>
+        
+        <div>
+          <Label htmlFor="category">Category</Label>
+          <Select 
+            defaultValue="Non-Fiction" 
+            value={category} 
+            onValueChange={setCategory}
+            disabled={isSearching || uploadSuccess}
+          >
+            <SelectTrigger className="mt-1">
+              <SelectValue placeholder="Select a category" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="Fiction">Fiction</SelectItem>
+              <SelectItem value="Non-Fiction">Non-Fiction</SelectItem>
+              <SelectItem value="Philosophy">Philosophy</SelectItem>
+              <SelectItem value="Science">Science</SelectItem>
+              <SelectItem value="History">History</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </form>
       
-      <div>
-        <Label htmlFor="title">Title</Label>
-        <Input 
-          id="title" 
-          value={title} 
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="Book title"
-          className="mt-1"
-          disabled={isUploading || uploadSuccess}
-        />
-      </div>
+      {searchResults.length > 0 && !selectedBook && (
+        <div className="mt-4">
+          <h3 className="text-sm font-medium mb-2">Search Results</h3>
+          <div className="space-y-2 max-h-60 overflow-y-auto">
+            {searchResults.map((book) => (
+              <div 
+                key={book.id} 
+                className="p-2 border rounded hover:bg-accent cursor-pointer flex items-center gap-3"
+                onClick={() => handleSelectBook(book)}
+              >
+                {book.volumeInfo.imageLinks?.thumbnail && (
+                  <img 
+                    src={book.volumeInfo.imageLinks.thumbnail} 
+                    alt={book.volumeInfo.title}
+                    className="h-12 w-8 object-cover"
+                  />
+                )}
+                <div>
+                  <p className="font-medium">{book.volumeInfo.title}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {book.volumeInfo.authors ? book.volumeInfo.authors.join(', ') : 'Unknown Author'}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       
-      <div>
-        <Label htmlFor="author">Author</Label>
-        <Input 
-          id="author" 
-          value={author} 
-          onChange={(e) => setAuthor(e.target.value)}
-          placeholder="Author name"
-          className="mt-1"
-          disabled={isUploading || uploadSuccess}
-        />
-      </div>
-      
-      <div>
-        <Label htmlFor="category">Category</Label>
-        <Select 
-          defaultValue="Non-Fiction" 
-          value={category} 
-          onValueChange={setCategory}
-          disabled={isUploading || uploadSuccess}
-        >
-          <SelectTrigger className="mt-1">
-            <SelectValue placeholder="Select a category" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="Fiction">Fiction</SelectItem>
-            <SelectItem value="Non-Fiction">Non-Fiction</SelectItem>
-            <SelectItem value="Philosophy">Philosophy</SelectItem>
-            <SelectItem value="Science">Science</SelectItem>
-            <SelectItem value="History">History</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+      {selectedBook && !uploadSuccess && (
+        <div className="mt-4 p-3 border rounded bg-accent/20">
+          <h3 className="font-medium mb-2">Selected Book</h3>
+          <div className="flex gap-3">
+            {selectedBook.volumeInfo.imageLinks?.thumbnail && (
+              <img 
+                src={selectedBook.volumeInfo.imageLinks.thumbnail} 
+                alt={selectedBook.volumeInfo.title}
+                className="h-20 w-14 object-cover"
+              />
+            )}
+            <div>
+              <p className="font-medium">{selectedBook.volumeInfo.title}</p>
+              <p className="text-sm text-muted-foreground">
+                {selectedBook.volumeInfo.authors ? selectedBook.volumeInfo.authors.join(', ') : 'Unknown Author'}
+              </p>
+              {selectedBook.volumeInfo.publishedDate && (
+                <p className="text-xs text-muted-foreground">
+                  Published: {selectedBook.volumeInfo.publishedDate}
+                </p>
+              )}
+            </div>
+          </div>
+          <Button 
+            onClick={handleAddBook} 
+            className="w-full mt-3"
+            disabled={isSearching}
+          >
+            {isSearching ? 
+              <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Adding...</> : 
+              'Add to My Library'}
+          </Button>
+        </div>
+      )}
       
       {error && (
         <Alert variant="destructive">
@@ -236,32 +295,16 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
           <Check className="h-4 w-4 text-green-600" />
           <AlertTitle className="text-green-800">Success</AlertTitle>
           <AlertDescription className="text-green-700">
-            Book "{title}" uploaded successfully!
+            Book "{selectedBook.volumeInfo.title}" added successfully!
             {bookId && (
               <div className="mt-1 text-xs">
                 Book ID: <span className="font-mono">{bookId}</span>
               </div>
             )}
-            {chunksCount && (
-              <div className="text-xs">
-                Chunks created: {chunksCount}
-              </div>
-            )}
           </AlertDescription>
         </Alert>
       )}
-      
-      <div className="flex justify-end gap-2 pt-2">
-        <Button 
-          type="submit" 
-          disabled={isUploading || uploadSuccess}
-          className="gap-2"
-        >
-          {isUploading && <Loader2 className="h-4 w-4 animate-spin" />}
-          {isUploading ? 'Uploading...' : uploadSuccess ? 'Uploaded Successfully' : 'Upload Book'}
-        </Button>
-      </div>
-    </form>
+    </div>
   );
 };
 
