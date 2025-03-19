@@ -72,12 +72,12 @@ function App() {
   );
 }
 
+// Separate component to handle chat with a specific book
 function ChatWithBook() {
   // Use useParams instead of directly accessing window.location
-  const params = useParams();
-  const bookId = params.bookId || null;
+  const { bookId } = useParams();
   
-  return <ChatInterface selectedBookId={bookId} />;
+  return <ChatInterface selectedBookId={bookId || null} />;
 }
 
 export default App;

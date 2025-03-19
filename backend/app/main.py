@@ -18,13 +18,14 @@ settings = Settings()
 # Create FastAPI app
 app = FastAPI(title="BookBodh API")
 
-# Add CORS middleware
+# Add CORS middleware with more permissive settings
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for development
+    allow_origins=["*"],  # Allow all origins
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
+    expose_headers=["Content-Type", "Content-Disposition"],
 )
 
 # Include routers
@@ -100,6 +101,9 @@ async def health_check():
     Health check endpoint for monitoring and diagnostics
     """
     try:
+        # Enhanced logging for health check
+        logger.info("Health check endpoint called")
+        
         # Check essential directories
         app_dir = os.path.dirname(__file__)
         cache_dir = os.path.join(app_dir, "cache")
@@ -109,10 +113,18 @@ async def health_check():
         os.makedirs(cache_dir, exist_ok=True)
         os.makedirs(screenshots_dir, exist_ok=True)
         
+        # Log more info
+        logger.info(f"Cache directory: {cache_dir}, exists: {os.path.exists(cache_dir)}")
+        logger.info(f"Screenshots directory: {screenshots_dir}, exists: {os.path.exists(screenshots_dir)}")
+        
         return {
             "status": "healthy",
             "message": "BookBodh API is running normally",
-            "version": "1.0.0"
+            "version": "1.0.0",
+            "directories": {
+                "cache": os.path.exists(cache_dir),
+                "screenshots": os.path.exists(screenshots_dir)
+            }
         }
     except Exception as e:
         logger.error(f"Health check failed: {str(e)}")

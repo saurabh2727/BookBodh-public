@@ -21,32 +21,64 @@ const DiagnosticPanel: React.FC = () => {
   const [bookId, setBookId] = useState('');
   const [bookTitle, setBookTitle] = useState('Test Book');
   const [isBackendConnected, setIsBackendConnected] = useState(false);
+  const [apiUrl, setApiUrl] = useState(import.meta.env.VITE_API_URL || 'http://localhost:8000');
   const { toast } = useToast();
 
   const checkBackendConnection = async () => {
     try {
-      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      setIsLoading(true);
+      console.log(`Checking backend connection to ${apiUrl}/health`);
+      
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // Increased timeout
 
-      const response = await fetch(`${baseUrl}/health`, {
-        signal: controller.signal
+      const response = await fetch(`${apiUrl}/health`, {
+        signal: controller.signal,
+        mode: 'cors',
+        headers: {
+          'Accept': 'application/json',
+        }
       }).then(res => {
         clearTimeout(timeoutId);
         return res;
       });
       
       if (response.ok) {
+        const data = await response.json();
+        console.log('Backend health check successful:', data);
         setIsBackendConnected(true);
+        
+        toast({
+          title: "Backend connected",
+          description: `Successfully connected to ${apiUrl}`,
+        });
+        
         return true;
       } else {
+        console.error('Backend health check failed with status:', response.status);
         setIsBackendConnected(false);
+        
+        toast({
+          variant: "destructive",
+          title: "Backend connection failed",
+          description: `Failed to connect to ${apiUrl} (Status: ${response.status})`,
+        });
+        
         return false;
       }
     } catch (error) {
       console.error("Backend connection check failed:", error);
       setIsBackendConnected(false);
+      
+      toast({
+        variant: "destructive",
+        title: "Backend connection failed",
+        description: error instanceof Error ? error.message : "Unknown error occurred",
+      });
+      
       return false;
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -60,13 +92,7 @@ const DiagnosticPanel: React.FC = () => {
       setResponse({
         status: 'error',
         message: 'Cannot connect to backend server',
-        details: 'The backend server appears to be offline or unreachable. Please make sure the FastAPI server is running.'
-      });
-      
-      toast({
-        variant: "destructive",
-        title: "Backend connection failed",
-        description: "Cannot connect to the backend server. Please make sure the FastAPI server is running.",
+        details: `The backend server appears to be offline or unreachable. Please make sure the FastAPI server is running at ${apiUrl}.`
       });
       
       setIsLoading(false);
@@ -74,11 +100,22 @@ const DiagnosticPanel: React.FC = () => {
     }
     
     try {
-      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-      const url = `${baseUrl}/diagnostic/${endpoint}`;
+      const url = `${apiUrl}/diagnostic/${endpoint}`;
+      console.log(`Fetching diagnostic data from: ${url}`);
       
-      const response = await fetch(url);
+      const response = await fetch(url, {
+        mode: 'cors',
+        headers: {
+          'Accept': 'application/json',
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Server responded with status: ${response.status}`);
+      }
+      
       const data = await response.json();
+      console.log(`Data received from ${endpoint}:`, data);
       setResponse(data);
       
       toast({
@@ -96,7 +133,7 @@ const DiagnosticPanel: React.FC = () => {
         error: error instanceof Error ? error.message : "Unknown error occurred",
         status: 'error',
         message: 'Failed to fetch diagnostic data',
-        details: 'The request to the backend server failed. Check the console for more details.'
+        details: `The request to ${apiUrl}/diagnostic/${endpoint} failed. Check the console for more details.`
       });
     } finally {
       setIsLoading(false);
@@ -131,18 +168,29 @@ const DiagnosticPanel: React.FC = () => {
       toast({
         variant: "destructive",
         title: "Backend connection failed",
-        description: "Cannot connect to the backend server. Please make sure the FastAPI server is running.",
+        description: `Cannot connect to the backend server at ${apiUrl}.`,
       });
       return;
     }
     
     setIsLoading(true);
     try {
-      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-      const url = `${baseUrl}/diagnostic/book-extraction/${bookId}?title=${encodeURIComponent(bookTitle)}`;
+      const url = `${apiUrl}/diagnostic/book-extraction/${bookId}?title=${encodeURIComponent(bookTitle)}`;
+      console.log(`Testing book extraction at: ${url}`);
       
-      const response = await fetch(url);
+      const response = await fetch(url, {
+        mode: 'cors',
+        headers: {
+          'Accept': 'application/json',
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Server responded with status: ${response.status}`);
+      }
+      
       const data = await response.json();
+      console.log('Book extraction test response:', data);
       setResponse(data);
       
       if (data.status === 'success') {
@@ -168,33 +216,31 @@ const DiagnosticPanel: React.FC = () => {
         status: 'error',
         error: error instanceof Error ? error.message : "Unknown error occurred",
         message: 'Failed to test book extraction',
-        details: 'The request to the backend server failed. Check the console for more details.'
+        details: `The request to ${apiUrl}/diagnostic/book-extraction/${bookId} failed. Check the console for more details.`
       });
     } finally {
       setIsLoading(false);
     }
   };
 
+  const handleApiUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setApiUrl(e.target.value);
+  };
+
+  const handleApiUrlSubmit = () => {
+    localStorage.setItem('diagnostics_api_url', apiUrl);
+    checkBackendConnection();
+  };
+
   useEffect(() => {
-    // Check if backend is running before loading diagnostics
-    checkBackendConnection().then(isConnected => {
-      if (isConnected) {
-        // Load directories data on initial render
-        fetchDiagnosticData('directories');
-      } else {
-        setResponse({
-          status: 'error',
-          message: 'Cannot connect to backend server',
-          details: 'The backend server appears to be offline or unreachable. Please make sure the FastAPI server is running.'
-        });
-        
-        toast({
-          variant: "destructive",
-          title: "Backend connection failed",
-          description: "Cannot connect to the backend server. Please make sure the FastAPI server is running.",
-        });
-      }
-    });
+    // Try to get API URL from localStorage first
+    const savedApiUrl = localStorage.getItem('diagnostics_api_url');
+    if (savedApiUrl) {
+      setApiUrl(savedApiUrl);
+    }
+    
+    // Check if backend is running
+    checkBackendConnection();
   }, []);
 
   const renderBackendConnectionStatus = () => (
@@ -209,8 +255,10 @@ const DiagnosticPanel: React.FC = () => {
         variant="outline" 
         size="sm" 
         onClick={() => checkBackendConnection()}
+        disabled={isLoading}
         className="ml-2"
       >
+        {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
         Check Connection
       </Button>
     </div>
@@ -231,22 +279,45 @@ const DiagnosticPanel: React.FC = () => {
       </CardHeader>
       <CardContent>
         {!isBackendConnected && (
-          <div className="mb-6 p-4 border border-red-200 bg-red-50 dark:bg-red-900/20 dark:border-red-800 rounded-md">
-            <div className="flex items-start gap-3">
-              <ServerCrash className="h-5 w-5 text-red-600 dark:text-red-400 mt-0.5" />
-              <div>
-                <h3 className="font-medium text-red-800 dark:text-red-300">Backend Server Unavailable</h3>
-                <p className="text-sm text-red-600 dark:text-red-400 mt-1">
-                  The diagnostics features require the FastAPI backend server to be running. 
-                  Please ensure it's started and accessible at {import.meta.env.VITE_API_URL || 'http://localhost:8000'}.
-                </p>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={() => checkBackendConnection()}
-                  className="mt-3 border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/30"
-                >
-                  Retry Connection
+          <div className="space-y-6">
+            <div className="mb-6 p-4 border border-red-200 bg-red-50 dark:bg-red-900/20 dark:border-red-800 rounded-md">
+              <div className="flex items-start gap-3">
+                <ServerCrash className="h-5 w-5 text-red-600 dark:text-red-400 mt-0.5" />
+                <div>
+                  <h3 className="font-medium text-red-800 dark:text-red-300">Backend Server Unavailable</h3>
+                  <p className="text-sm text-red-600 dark:text-red-400 mt-1">
+                    The diagnostics features require the FastAPI backend server to be running. 
+                    Please ensure it's started and accessible at {apiUrl}.
+                  </p>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => checkBackendConnection()}
+                    disabled={isLoading}
+                    className="mt-3 border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/30"
+                  >
+                    {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                    Retry Connection
+                  </Button>
+                </div>
+              </div>
+            </div>
+            
+            <div className="p-4 border border-amber-200 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-800 rounded-md">
+              <h3 className="font-medium text-amber-800 dark:text-amber-300 mb-2">Configure Backend URL</h3>
+              <p className="text-sm text-amber-600 dark:text-amber-400 mb-3">
+                If your backend is running on a different address, you can update it here:
+              </p>
+              <div className="flex gap-2">
+                <Input 
+                  value={apiUrl} 
+                  onChange={handleApiUrlChange} 
+                  placeholder="http://localhost:8000"
+                  className="flex-1"
+                />
+                <Button onClick={handleApiUrlSubmit} disabled={isLoading}>
+                  {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                  Update URL
                 </Button>
               </div>
             </div>
