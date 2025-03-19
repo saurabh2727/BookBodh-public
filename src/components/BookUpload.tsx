@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,7 +12,7 @@ import {
 import { Loader2, AlertCircle, Check, Search } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { toast } from "@/hooks/use-toast";
-import { supabase, ensureAuthIsValid } from '@/lib/supabase';
+import { supabase, ensureAuthIsValid, forceSessionRefresh } from '@/lib/supabase';
 
 interface BookUploadProps {
   onClose: () => void;
@@ -32,7 +31,6 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
   const [selectedBook, setSelectedBook] = useState<any | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
 
-  // Check authentication status on component mount
   useEffect(() => {
     const checkAuth = async () => {
       try {
@@ -75,7 +73,6 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
       
       console.log('Searching for books with query:', searchQuery);
       
-      // Ensure we have a valid auth session before proceeding
       if (!isAuthenticated) {
         console.log('BookUpload: Attempting to refresh auth before search...');
         const isValid = await ensureAuthIsValid();
@@ -86,7 +83,6 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
         setIsAuthenticated(true);
       }
       
-      // Use the Edge Function to search for books
       const { data, error } = await supabase.functions.invoke('search-books', {
         method: 'POST',
         body: { query: searchQuery },
@@ -123,7 +119,6 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
   const handleSelectBook = (book: any) => {
     setSelectedBook(book);
     
-    // Extract book details
     const title = book.volumeInfo.title;
     const authors = book.volumeInfo.authors || ['Unknown Author'];
     
@@ -146,7 +141,14 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
       
       console.log('Adding book to library:', selectedBook.volumeInfo.title);
       
-      // Ensure valid authentication before proceeding
+      console.log('BookUpload: Forcing session refresh before adding book...');
+      const refreshSuccess = await forceSessionRefresh();
+      
+      if (!refreshSuccess) {
+        console.error('BookUpload: Failed to refresh authentication session');
+        throw new Error('Session refresh failed. Please login again.');
+      }
+      
       console.log('BookUpload: Validating auth session before adding book...');
       const isValid = await ensureAuthIsValid();
       if (!isValid) {
@@ -154,7 +156,6 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
         throw new Error('Authentication required. Please log in again.');
       }
       
-      // Get a fresh auth session
       const { data: sessionData } = await supabase.auth.getSession();
       if (!sessionData.session) {
         console.error('BookUpload: No active session found after refresh');
@@ -164,7 +165,6 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
       console.log('BookUpload: Auth validated, token present with length:', 
         sessionData.session.access_token.length);
       
-      // Use the Edge Function to add the book with explicit auth token
       const { data, error } = await supabase.functions.invoke('add-book', {
         method: 'POST',
         body: { 
@@ -366,3 +366,4 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
 };
 
 export default BookUpload;
+
