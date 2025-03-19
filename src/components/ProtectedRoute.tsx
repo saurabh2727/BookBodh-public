@@ -12,38 +12,74 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
   const [authenticated, setAuthenticated] = useState(false);
 
   useEffect(() => {
-    const checkAuth = async () => {
+    // Function to check and initialize auth
+    const initAuth = async () => {
       try {
+        console.log('Initializing auth in ProtectedRoute...');
+        
+        // Get the current session
         const { data, error } = await supabase.auth.getSession();
         
         if (error) {
           console.error('Error checking session:', error);
           setAuthenticated(false);
-        } else if (data.session) {
-          console.log('Session found in checkAuth, expires at:', new Date(data.session.expires_at * 1000).toLocaleString());
+          setLoading(false);
+          return;
+        }
+        
+        if (data.session) {
+          console.log('Session found during init, expires at:', new Date(data.session.expires_at * 1000).toLocaleString());
           setAuthenticated(true);
         } else {
-          console.log('No session found in checkAuth');
-          setAuthenticated(false);
+          console.log('No session found during init');
+          
+          // Try to refresh the session as a fallback
+          try {
+            const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+            
+            if (refreshError) {
+              console.error('Error refreshing session:', refreshError);
+              setAuthenticated(false);
+            } else if (refreshData.session) {
+              console.log('Session refreshed successfully');
+              setAuthenticated(true);
+            } else {
+              console.log('No session after refresh attempt');
+              setAuthenticated(false);
+            }
+          } catch (refreshError) {
+            console.error('Exception during session refresh:', refreshError);
+            setAuthenticated(false);
+          }
         }
-      } catch (error) {
-        console.error('Error checking authentication:', error);
+      } catch (err) {
+        console.error('Unexpected error in initAuth:', err);
         setAuthenticated(false);
       } finally {
         setLoading(false);
       }
     };
 
+    // Set up the auth state change listener
     const { data: authListener } = supabase.auth.onAuthStateChange(
       (event, session) => {
         console.log('Auth state changed:', event, 'Session exists:', !!session);
-        setAuthenticated(!!session);
+        
+        // Update state based on the session
+        if (session) {
+          setAuthenticated(true);
+        } else if (event === 'SIGNED_OUT') {
+          setAuthenticated(false);
+        }
+        
         setLoading(false);
       }
     );
 
-    checkAuth();
+    // Initialize auth
+    initAuth();
 
+    // Clean up the listener on unmount
     return () => {
       authListener?.subscription.unsubscribe();
     };

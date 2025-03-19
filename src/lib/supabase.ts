@@ -15,6 +15,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
+    // Explicitly use localStorage for session storage
     storage: localStorage
   }
 });
@@ -31,8 +32,17 @@ export const getAuthHeader = async () => {
     }
     
     if (!data.session) {
-      console.warn('No active session found');
-      return undefined;
+      // Try to refresh the session if it's not found
+      const { data: refreshData } = await supabase.auth.refreshSession();
+      
+      // If we still don't have a session after attempting refresh
+      if (!refreshData.session) {
+        console.warn('No active session found after refresh attempt');
+        return undefined;
+      }
+      
+      console.log('Session refreshed successfully');
+      return `Bearer ${refreshData.session.access_token}`;
     }
     
     const token = data.session.access_token;
