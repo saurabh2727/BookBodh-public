@@ -1,23 +1,33 @@
 
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Toaster } from '@/components/ui/sonner';
-import { ThemeProvider } from '@/hooks/useTheme';
-import Index from '@/pages/Index';
-import Login from '@/pages/Login';
-import NotFound from '@/pages/NotFound';
-import ProtectedRoute from '@/components/ProtectedRoute';
+import { ThemeProvider } from '@/components/theme-provider';
+import { Toaster } from '@/components/ui/toaster';
+import { Toaster as SonnerToaster } from '@/components/ui/sonner';
+import Index from './pages/Index';
+import Login from './pages/Login';
+import NotFound from './pages/NotFound';
+import ProtectedRoute from './components/ProtectedRoute';
+import ChatInterface from './components/ChatInterface';
+import Diagnostics from './pages/Diagnostics';
 import './App.css';
 
-const queryClient = new QueryClient();
+// Create a client
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 5 * 60 * 1000, // 5 minutes
+      refetchOnWindowFocus: false,
+    }
+  }
+});
 
 function App() {
   return (
-    <ThemeProvider defaultTheme="system">
-      <QueryClientProvider client={queryClient}>
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider defaultTheme="system" storageKey="bookbodh-theme">
         <Router>
           <Routes>
-            <Route path="/login" element={<Login />} />
             <Route 
               path="/" 
               element={
@@ -30,7 +40,7 @@ function App() {
               path="/chat" 
               element={
                 <ProtectedRoute>
-                  <Index />
+                  <ChatInterface />
                 </ProtectedRoute>
               } 
             />
@@ -38,17 +48,33 @@ function App() {
               path="/chat/:bookId" 
               element={
                 <ProtectedRoute>
-                  <Index />
+                  <ChatWithBook />
                 </ProtectedRoute>
               } 
             />
+            <Route 
+              path="/diagnostics" 
+              element={
+                <ProtectedRoute>
+                  <Diagnostics />
+                </ProtectedRoute>
+              } 
+            />
+            <Route path="/login" element={<Login />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
-          <Toaster position="bottom-right" richColors />
         </Router>
-      </QueryClientProvider>
-    </ThemeProvider>
+        <Toaster />
+        <SonnerToaster position="bottom-right" />
+      </ThemeProvider>
+    </QueryClientProvider>
   );
+}
+
+function ChatWithBook() {
+  const location = window.location;
+  const bookId = location.pathname.split('/').pop() || null;
+  return <ChatInterface selectedBookId={bookId} />;
 }
 
 export default App;

@@ -18,6 +18,7 @@ export interface ChatMessage {
   isBookWelcome?: boolean;
   isExtractionStatus?: boolean;
   isExtractionComplete?: boolean;
+  isExtractionError?: boolean;
 }
 
 export interface Book {
@@ -62,4 +63,13 @@ export interface BookChunk {
   text: string;
   summary?: string;
   created_at: string;
+}
+
+export interface ExtractionStatus {
+  status: string;
+  message: string;
+  book_id: string;
+  screenshots_count: number;
+  text_length: number;
+  error?: string;
 }

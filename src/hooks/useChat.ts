@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { ChatMessage } from '../types';
@@ -16,6 +17,8 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
   const [bookChunks, setBookChunks] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [extractionInProgress, setExtractionInProgress] = useState(false);
+  const [extractionAttempts, setExtractionAttempts] = useState(0);
+  const maxExtractionAttempts = 3;
 
   useEffect(() => {
     const loadBookChunks = async () => {
@@ -28,18 +31,37 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
           if (!chunks || chunks.length === 0) {
             console.warn('No chunks found for book ID:', selectedBookId);
             
-            setExtractionInProgress(true);
-            
-            setMessages(prev => [
-              ...prev,
-              {
-                id: uuidv4(),
-                content: "I'm extracting content from this book. This might take a minute or two for the first question. The system will take screenshots of the book preview and use OCR to extract the text.",
-                type: 'bot',
-                timestamp: new Date(),
-                isSystemMessage: true
-              }
-            ]);
+            if (extractionAttempts < maxExtractionAttempts) {
+              setExtractionInProgress(true);
+              setExtractionAttempts(prev => prev + 1);
+              
+              setMessages(prev => [
+                ...prev,
+                {
+                  id: uuidv4(),
+                  content: "I'm extracting content from this book. This might take a minute or two for the first question. The system will take screenshots of the book preview and use OCR to extract the text.",
+                  type: 'bot',
+                  timestamp: new Date(),
+                  isSystemMessage: true,
+                  isExtractionStatus: true
+                }
+              ]);
+            } else {
+              console.error(`Extraction failed after ${maxExtractionAttempts} attempts`);
+              setExtractionInProgress(false);
+              
+              setMessages(prev => [
+                ...prev,
+                {
+                  id: uuidv4(),
+                  content: `I was unable to extract text from this book after multiple attempts. The book may not have a preview available on Google Books, or there might be an issue with the extraction process. Please try asking a general question instead.`,
+                  type: 'bot',
+                  timestamp: new Date(),
+                  isSystemMessage: true,
+                  isExtractionError: true
+                }
+              ]);
+            }
             
             setBookChunks([]);
           } else {
@@ -47,6 +69,7 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
             console.log('Sample chunk:', chunks[0]);
             
             setExtractionInProgress(false);
+            setExtractionAttempts(0); // Reset extraction attempts on success
             
             if (messages.length <= 1 || messages[messages.length - 1].type === 'user') {
               setMessages(prev => [
@@ -66,15 +89,32 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
         } catch (error) {
           console.error('Error loading book chunks:', error);
           setError('Failed to load book data. Please try again later.');
+          
+          // Display error to user if extraction was in progress
+          if (extractionInProgress) {
+            setMessages(prev => [
+              ...prev,
+              {
+                id: uuidv4(),
+                content: `There was an error loading the book content: ${error instanceof Error ? error.message : 'Unknown error'}. Please try again later or select a different book.`,
+                type: 'bot',
+                timestamp: new Date(),
+                isSystemMessage: true,
+                isExtractionError: true
+              }
+            ]);
+            setExtractionInProgress(false);
+          }
         }
       } else {
         setBookChunks([]);
         setExtractionInProgress(false);
+        setExtractionAttempts(0); // Reset on book change
       }
     };
 
     loadBookChunks();
-  }, [selectedBookId, selectedBook, messages]);
+  }, [selectedBookId, selectedBook, extractionAttempts, messages.length]);
 
   const handleSubmit = async (query: string) => {
     if (!query.trim() || isLoading) return;
@@ -148,6 +188,7 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
             console.log(`Now loaded ${updatedChunks.length} chunks after extraction`);
             setBookChunks(updatedChunks);
             setExtractionInProgress(false);
+            setExtractionAttempts(0); // Reset on successful extraction
             
             setMessages((prev) => [
               ...prev.filter(msg => !msg.isExtractionComplete),
@@ -158,6 +199,21 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
                 timestamp: new Date(),
                 isSystemMessage: true,
                 isExtractionComplete: true
+              }
+            ]);
+          } else if (extractionAttempts >= maxExtractionAttempts) {
+            console.warn(`Still no chunks after ${extractionAttempts} attempts`);
+            setExtractionInProgress(false);
+            
+            setMessages((prev) => [
+              ...prev.filter(msg => !msg.isExtractionError),
+              {
+                id: uuidv4(),
+                content: `I was unable to extract text from this book after multiple attempts. The book may not have a preview available, or there might be an issue with the extraction process.`,
+                type: 'bot',
+                timestamp: new Date(),
+                isSystemMessage: true,
+                isExtractionError: true
               }
             ]);
           }
