@@ -16,6 +16,7 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
   const [isLoading, setIsLoading] = useState(false);
   const [bookChunks, setBookChunks] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [extractionInProgress, setExtractionInProgress] = useState(false);
 
   // Fetch book chunks when a book ID is selected
   useEffect(() => {
@@ -29,12 +30,15 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
           if (!chunks || chunks.length === 0) {
             console.warn('No chunks found for book ID:', selectedBookId);
             
+            // Set extraction in progress flag
+            setExtractionInProgress(true);
+            
             // Add a message about content extraction
             setMessages(prev => [
               ...prev,
               {
                 id: uuidv4(),
-                content: "I'm extracting content from this book. This might take a minute or two for the first question.",
+                content: "I'm extracting content from this book. This might take a minute or two for the first question. The system will take screenshots of the book preview and use OCR to extract the text.",
                 type: 'bot',
                 timestamp: new Date(),
                 isSystemMessage: true
@@ -46,6 +50,9 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
           } else {
             console.log(`Loaded ${chunks.length} chunks for book ID: ${selectedBookId}`);
             console.log('Sample chunk:', chunks[0]);
+            
+            // Clear extraction flag if we have chunks
+            setExtractionInProgress(false);
             
             // When a new book is selected, add a welcome message for that book
             if (messages.length <= 1 || messages[messages.length - 1].type === 'user') {
@@ -70,6 +77,7 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
       } else {
         // Reset when no book ID is selected
         setBookChunks([]);
+        setExtractionInProgress(false);
       }
     };
 
@@ -106,6 +114,22 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
     setIsLoading(true);
 
     try {
+      // If extraction is in progress, add an additional notice
+      if (extractionInProgress && selectedBookId) {
+        const extractionMessageId = uuidv4();
+        setMessages((prev) => [
+          ...prev.filter(msg => !msg.isExtractionStatus),
+          {
+            id: extractionMessageId,
+            content: "Content extraction is in progress. The system is taking screenshots and processing them with OCR. Your response might be based on partial book content until extraction completes.",
+            type: 'bot',
+            timestamp: new Date(),
+            isSystemMessage: true,
+            isExtractionStatus: true
+          }
+        ]);
+      }
+      
       // Prepare the request payload with book chunks if book is selected
       const requestPayload = {
         query,
@@ -129,6 +153,33 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
       });
       
       const response = await sendChatRequest(requestPayload);
+
+      // If we received a response and had no chunks before, try to fetch chunks again
+      if (response && extractionInProgress && selectedBookId) {
+        try {
+          const updatedChunks = await fetchBookChunks(selectedBookId);
+          if (updatedChunks && updatedChunks.length > 0) {
+            console.log(`Now loaded ${updatedChunks.length} chunks after extraction`);
+            setBookChunks(updatedChunks);
+            setExtractionInProgress(false);
+            
+            // Add a success message
+            setMessages((prev) => [
+              ...prev.filter(msg => !msg.isExtractionComplete),
+              {
+                id: uuidv4(),
+                content: `Content extraction completed successfully. Extracted ${updatedChunks.length} chunks from the book.`,
+                type: 'bot',
+                timestamp: new Date(),
+                isSystemMessage: true,
+                isExtractionComplete: true
+              }
+            ]);
+          }
+        } catch (chunkError) {
+          console.error('Error checking for updated chunks:', chunkError);
+        }
+      }
 
       // Replace loading message with response
       setMessages((prev) =>
@@ -183,7 +234,8 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
     messages,
     isLoading,
     handleSubmit,
-    error
+    error,
+    extractionInProgress
   };
 };
 

@@ -6,6 +6,7 @@ import json
 from typing import List, Dict, Optional, Tuple
 from PIL import Image
 import pytesseract
+import datetime
 
 # Configure logger
 logging.basicConfig(level=logging.INFO)
@@ -36,6 +37,11 @@ class BookExtractor:
         """
         self.cache_dir = cache_dir or os.path.join(os.path.dirname(os.path.dirname(__file__)), "cache")
         os.makedirs(self.cache_dir, exist_ok=True)
+        
+        # Create a dedicated screenshots directory
+        self.screenshots_dir = os.path.join(self.cache_dir, "screenshots")
+        os.makedirs(self.screenshots_dir, exist_ok=True)
+        
         self.selenium_available = SELENIUM_AVAILABLE
     
     def extract_from_google_books(self, book_id: str, title: str, max_pages: int = 20) -> Tuple[str, List[str]]:
@@ -56,10 +62,22 @@ class BookExtractor:
         
         logger.info(f"Starting Google Books extraction for book ID: {book_id}, title: {title}")
         
-        # Create a directory for this book's screenshots
+        # Create a timestamped directory for this extraction run
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         sanitized_title = "".join(c if c.isalnum() else "_" for c in title)
-        book_screenshot_dir = os.path.join(self.cache_dir, f"book_{book_id}_{sanitized_title}")
+        book_screenshot_dir = os.path.join(self.screenshots_dir, f"{timestamp}_{book_id}_{sanitized_title}")
         os.makedirs(book_screenshot_dir, exist_ok=True)
+        
+        # Create a log file within the screenshot directory
+        log_file_path = os.path.join(book_screenshot_dir, "extraction_log.txt")
+        file_handler = logging.FileHandler(log_file_path)
+        file_handler.setLevel(logging.DEBUG)
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+        
+        logger.info(f"Screenshots will be saved to: {book_screenshot_dir}")
+        logger.info(f"Log file created at: {log_file_path}")
         
         extracted_text = ""
         screenshot_paths = []
@@ -79,14 +97,36 @@ class BookExtractor:
             logger.info(f"Navigating to Google Books URL: {iframe_url}")
             driver.get(iframe_url)
             
+            # Take a screenshot of the initial page load to verify
+            initial_screenshot_path = os.path.join(book_screenshot_dir, "initial_page_load.png")
+            driver.save_screenshot(initial_screenshot_path)
+            logger.info(f"Initial page load screenshot saved: {initial_screenshot_path}")
+            
             # Wait for the page to load
             time.sleep(3)
             
+            # Take a screenshot after waiting to verify page is fully loaded
+            after_wait_screenshot_path = os.path.join(book_screenshot_dir, "after_wait.png")
+            driver.save_screenshot(after_wait_screenshot_path)
+            logger.info(f"After wait screenshot saved: {after_wait_screenshot_path}")
+            
+            # Check page dimensions and log them
+            page_width = driver.execute_script("return document.body.scrollWidth")
+            page_height = driver.execute_script("return document.body.scrollHeight")
+            logger.info(f"Page dimensions: {page_width}x{page_height} pixels")
+            
             # Check for iframes and switch if found
             iframes = driver.find_elements(By.TAG_NAME, "iframe")
+            logger.info(f"Found {len(iframes)} iframes on the page")
+            
             if iframes:
-                logger.info(f"Found {len(iframes)} iframes, switching to first iframe")
+                logger.info(f"Switching to first iframe")
                 driver.switch_to.frame(iframes[0])
+                
+                # Take a screenshot after switching to iframe
+                iframe_screenshot_path = os.path.join(book_screenshot_dir, "inside_iframe.png")
+                driver.save_screenshot(iframe_screenshot_path)
+                logger.info(f"Inside iframe screenshot saved: {iframe_screenshot_path}")
                 
                 # Scroll multiple times to load content and take screenshots
                 body = driver.find_element(By.TAG_NAME, "body")
@@ -101,11 +141,34 @@ class BookExtractor:
                     screenshot_paths.append(screenshot_path)
                     logger.info(f"Screenshot saved: {screenshot_path}")
                     
-                    # Use OCR (Tesseract) to extract text
+                    # Check if screenshot is not empty (completely white or black)
                     image = Image.open(screenshot_path)
-                    page_text = pytesseract.image_to_string(image)
-                    page_texts.append(page_text)
-                    logger.info(f"Extracted {len(page_text)} characters of text from page {i+1}")
+                    is_blank = self._is_blank_image(image)
+                    if is_blank:
+                        logger.warning(f"Screenshot {i+1} appears to be blank or empty")
+                    
+                    # Use OCR (Tesseract) to extract text
+                    try:
+                        page_text = pytesseract.image_to_string(image)
+                        page_text_length = len(page_text.strip())
+                        logger.info(f"Extracted {page_text_length} characters of text from page {i+1}")
+                        
+                        # Log a sample of the extracted text
+                        sample_text = page_text[:100] + "..." if len(page_text) > 100 else page_text
+                        logger.info(f"Sample text from page {i+1}: {sample_text}")
+                        
+                        # Save the extracted text to a file for debugging
+                        text_file_path = os.path.join(book_screenshot_dir, f"page_{i+1}_text.txt")
+                        with open(text_file_path, "w", encoding="utf-8") as f:
+                            f.write(page_text)
+                        logger.info(f"Saved extracted text to: {text_file_path}")
+                        
+                        if page_text_length > 0:
+                            page_texts.append(page_text)
+                        else:
+                            logger.warning(f"No text extracted from page {i+1}")
+                    except Exception as ocr_error:
+                        logger.error(f"OCR error on page {i+1}: {str(ocr_error)}")
                     
                     # Scroll down for next screenshot
                     body.send_keys(Keys.PAGE_DOWN)
@@ -138,16 +201,47 @@ class BookExtractor:
                 
             else:
                 logger.warning("No iframe found on Google Books page")
+                dom_structure = driver.execute_script("return document.body.innerHTML")
+                dom_file_path = os.path.join(book_screenshot_dir, "dom_structure.html")
+                with open(dom_file_path, "w", encoding="utf-8") as f:
+                    f.write(dom_structure)
+                logger.info(f"Saved DOM structure to: {dom_file_path}")
+                
                 extracted_text = "No iframe found on Google Books page. Unable to extract content."
                 
         except Exception as e:
-            logger.error(f"Error during Google Books extraction: {str(e)}")
+            logger.error(f"Error during Google Books extraction: {str(e)}", exc_info=True)
             extracted_text = f"Error during extraction: {str(e)}"
         finally:
-            driver.quit()
-            logger.info("WebDriver closed")
+            try:
+                driver.quit()
+                logger.info("WebDriver closed")
+            except Exception as close_error:
+                logger.error(f"Error closing WebDriver: {str(close_error)}")
+            
+            logger.removeHandler(file_handler)
+            file_handler.close()
         
         return extracted_text, screenshot_paths
+    
+    def _is_blank_image(self, image: Image.Image) -> bool:
+        """Check if an image is blank (mostly white or black)"""
+        # Convert to grayscale
+        gray_image = image.convert('L')
+        
+        # Get histogram
+        histogram = gray_image.histogram()
+        
+        # Check if most pixels are white (255) or black (0)
+        total_pixels = gray_image.width * gray_image.height
+        white_pixels = histogram[245:] # Near-white pixels (245-255)
+        black_pixels = histogram[:10]  # Near-black pixels (0-9)
+        
+        white_ratio = sum(white_pixels) / total_pixels
+        black_ratio = sum(black_pixels) / total_pixels
+        
+        # If more than 95% of pixels are white or black, consider it blank
+        return white_ratio > 0.95 or black_ratio > 0.95
     
     def process_book_to_chunks(self, book_id: str, text: str, title: str, author: str) -> List[Dict]:
         """
@@ -186,4 +280,11 @@ class BookExtractor:
                 })
         
         logger.info(f"Created {len(chunks)} chunks from book {book_id}")
+        
+        # Save the chunks to a chunks file for debugging
+        chunks_file_path = os.path.join(self.cache_dir, f"book_{book_id}_chunks.json")
+        with open(chunks_file_path, "w", encoding="utf-8") as f:
+            json.dump(chunks, f, indent=2)
+        logger.info(f"Saved chunks data to {chunks_file_path}")
+        
         return chunks

@@ -1,4 +1,3 @@
-
 from app.database.books import BookDatabase
 from app.database.embeddings import EmbeddingStore
 from typing import List, Dict, Optional
@@ -95,10 +94,13 @@ def retrieve_chunks(query: str, book: Optional[str] = None, book_id: Optional[st
                     
                     try:
                         # Extract content using Selenium and OCR
-                        extracted_text, _ = book_extractor.extract_from_google_books(
+                        extracted_text, screenshot_paths = book_extractor.extract_from_google_books(
                             extraction_id, 
                             book_data.get('title', 'Unknown Book')
                         )
+                        
+                        logger.info(f"Extraction completed with {len(screenshot_paths)} screenshots")
+                        logger.info(f"Extracted text length: {len(extracted_text)} characters")
                         
                         if extracted_text and len(extracted_text) > 200:
                             logger.info(f"Successfully extracted {len(extracted_text)} chars of text using Selenium/OCR")
@@ -111,17 +113,24 @@ def retrieve_chunks(query: str, book: Optional[str] = None, book_id: Optional[st
                                 book_data.get('author', 'Unknown')
                             )
                             
-                            # Add chunks to database
-                            for chunk in ocr_chunks:
-                                book_db.add_chunk(
-                                    book_id=book_id,
-                                    chunk_index=chunk['chunk_index'],
-                                    title=chunk['title'],
-                                    text=chunk['text'],
-                                    author=chunk['author']
-                                )
+                            logger.info(f"Processing completed. Created {len(ocr_chunks)} chunks")
                             
-                            logger.info(f"Added {len(ocr_chunks)} chunks to database for book_id {book_id}")
+                            # Add chunks to database
+                            success_count = 0
+                            for chunk in ocr_chunks:
+                                try:
+                                    book_db.add_chunk(
+                                        book_id=book_id,
+                                        chunk_index=chunk['chunk_index'],
+                                        title=chunk['title'],
+                                        text=chunk['text'],
+                                        author=chunk['author']
+                                    )
+                                    success_count += 1
+                                except Exception as chunk_error:
+                                    logger.error(f"Error adding chunk {chunk['chunk_index']}: {str(chunk_error)}")
+                            
+                            logger.info(f"Added {success_count} chunks to database for book_id {book_id}")
                             
                             # Now retrieve the chunks again
                             book_chunks = book_db.get_chunks_by_book_id(book_id)
@@ -136,10 +145,12 @@ def retrieve_chunks(query: str, book: Optional[str] = None, book_id: Optional[st
                                         "score": 1.0
                                     })
                                 return chunks
+                            else:
+                                logger.warning("No chunks found in database after adding them - database issue?")
                         else:
                             logger.warning(f"Failed to extract sufficient text using Selenium/OCR: {len(extracted_text) if extracted_text else 0} chars")
                     except Exception as e:
-                        logger.error(f"Error during Selenium/OCR extraction: {str(e)}")
+                        logger.error(f"Error during Selenium/OCR extraction: {str(e)}", exc_info=True)
             
             # Try to reload the database cache
             try:
