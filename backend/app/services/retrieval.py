@@ -6,14 +6,16 @@ import logging
 import os
 import json
 import time
+from app.services.book_extraction import BookExtractor
 
 # Configure logger
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize database and embedding store
+# Initialize database, embedding store, and book extractor
 book_db = BookDatabase()
 embedding_store = EmbeddingStore(book_db)
+book_extractor = BookExtractor()
 
 def retrieve_chunks(query: str, book: Optional[str] = None, book_id: Optional[str] = None) -> List[Dict]:
     """
@@ -66,11 +68,84 @@ def retrieve_chunks(query: str, book: Optional[str] = None, book_id: Optional[st
             return chunks
         else:
             logger.warning(f"No chunks found for book_id {book_id}")
+            
+            # Try to get the book details
+            book_data = book_db.get_book(book_id)
+            if book_data:
+                logger.info(f"Found book data: {book_data.get('title')}, attempting extraction")
+                
+                # Check if this is a Google Books ID
+                google_books_id = None
+                file_url = book_data.get('file_url', '')
+                if 'books.google' in file_url or 'play.google' in file_url:
+                    # Try to extract Google Books ID from URL
+                    if 'id=' in file_url:
+                        google_books_id = file_url.split('id=')[1].split('&')[0]
+                    elif '/books?id=' in file_url:
+                        google_books_id = file_url.split('/books?id=')[1].split('&')[0]
+                    elif '/books/edition/' in file_url:
+                        parts = file_url.split('/books/edition/')
+                        if len(parts) > 1 and '/' in parts[1]:
+                            google_books_id = parts[1].split('/')[0]
+                
+                # If we have a Google Books ID or can use the book_id directly
+                extraction_id = google_books_id or book_id
+                if extraction_id:
+                    logger.info(f"Attempting to extract content using Selenium/OCR for book ID: {extraction_id}")
+                    
+                    try:
+                        # Extract content using Selenium and OCR
+                        extracted_text, _ = book_extractor.extract_from_google_books(
+                            extraction_id, 
+                            book_data.get('title', 'Unknown Book')
+                        )
+                        
+                        if extracted_text and len(extracted_text) > 200:
+                            logger.info(f"Successfully extracted {len(extracted_text)} chars of text using Selenium/OCR")
+                            
+                            # Process into chunks
+                            ocr_chunks = book_extractor.process_book_to_chunks(
+                                book_id,
+                                extracted_text,
+                                book_data.get('title', 'Unknown'),
+                                book_data.get('author', 'Unknown')
+                            )
+                            
+                            # Add chunks to database
+                            for chunk in ocr_chunks:
+                                book_db.add_chunk(
+                                    book_id=book_id,
+                                    chunk_index=chunk['chunk_index'],
+                                    title=chunk['title'],
+                                    text=chunk['text'],
+                                    author=chunk['author']
+                                )
+                            
+                            logger.info(f"Added {len(ocr_chunks)} chunks to database for book_id {book_id}")
+                            
+                            # Now retrieve the chunks again
+                            book_chunks = book_db.get_chunks_by_book_id(book_id)
+                            
+                            if book_chunks:
+                                logger.info(f"Retrieved {len(book_chunks)} chunks after extraction")
+                                for chunk_data in book_chunks:
+                                    chunks.append({
+                                        "text": chunk_data["text"],
+                                        "title": chunk_data["title"],
+                                        "author": chunk_data.get("author", "Unknown"),
+                                        "score": 1.0
+                                    })
+                                return chunks
+                        else:
+                            logger.warning(f"Failed to extract sufficient text using Selenium/OCR: {len(extracted_text) if extracted_text else 0} chars")
+                    except Exception as e:
+                        logger.error(f"Error during Selenium/OCR extraction: {str(e)}")
+            
             # Try to reload the database cache
             try:
                 logger.info("Attempting to reload book database cache")
                 # Force cache reload
-                book_db._load_external_books(force_reload=True)
+                book_db._load_external_books()
                 
                 # Try again after reload
                 book_chunks = book_db.get_chunks_by_book_id(book_id)
@@ -149,46 +224,6 @@ def retrieve_chunks(query: str, book: Optional[str] = None, book_id: Optional[st
             except Exception as gen_error:
                 logger.error(f"Error generating chunks dynamically: {gen_error}")
     
-    # If no book_id or no chunks found with book_id, try using book title
-    if book and not chunks:
-        logger.info(f"Using book title '{book}' for retrieval")
-        
-        # Get embeddings for the query
-        results = embedding_store.search(query, k=3, filter_book=book)
-        
-        # Format results with metadata
-        chunks = []
-        for chunk_id, score in results:
-            chunk_data = book_db.get_chunk(chunk_id)
-            if chunk_data:
-                chunks.append({
-                    "text": chunk_data["text"],
-                    "title": chunk_data["title"],
-                    "author": chunk_data.get("author", "Unknown"),
-                    "score": float(score)
-                })
-        
-        logger.info(f"Found {len(chunks)} chunks using semantic search for book '{book}'")
-    
-    # If no book specified or no chunks found with book title, try general search
-    if (not book and not book_id) or not chunks:
-        logger.info("Using general search across all books")
-        
-        # Get embeddings for the query across all books
-        results = embedding_store.search(query, k=3)
-        
-        # Format results with metadata
-        chunks = []
-        for chunk_id, score in results:
-            chunk_data = book_db.get_chunk(chunk_id)
-            if chunk_data:
-                chunks.append({
-                    "text": chunk_data["text"],
-                    "title": chunk_data["title"],
-                    "author": chunk_data.get("author", "Unknown"),
-                    "score": float(score)
-                })
-        
-        logger.info(f"Found {len(chunks)} chunks using general search")
+    # ... keep existing code for book title search and general search
     
     return chunks

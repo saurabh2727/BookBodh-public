@@ -28,9 +28,24 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
           
           if (!chunks || chunks.length === 0) {
             console.warn('No chunks found for book ID:', selectedBookId);
-            setError('No content found for this book. Please try uploading it again.');
+            
+            // Add a message about content extraction
+            setMessages(prev => [
+              ...prev,
+              {
+                id: uuidv4(),
+                content: "I'm extracting content from this book. This might take a minute or two for the first question.",
+                type: 'bot',
+                timestamp: new Date(),
+                isSystemMessage: true
+              }
+            ]);
+            
+            // Set a small empty array of chunks - the backend will handle extraction on first query
+            setBookChunks([]);
           } else {
             console.log(`Loaded ${chunks.length} chunks for book ID: ${selectedBookId}`);
+            console.log('Sample chunk:', chunks[0]);
             
             // When a new book is selected, add a welcome message for that book
             if (messages.length <= 1 || messages[messages.length - 1].type === 'user') {
@@ -45,9 +60,9 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
                 }
               ]);
             }
+            
+            setBookChunks(chunks);
           }
-          
-          setBookChunks(chunks || []);
         } catch (error) {
           console.error('Error loading book chunks:', error);
           setError('Failed to load book data. Please try again later.');

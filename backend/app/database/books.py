@@ -1,4 +1,3 @@
-
 from typing import Dict, List, Optional
 import re
 import uuid
@@ -76,8 +75,13 @@ Aurelius consistently returns to the importance of accepting what cannot be chan
         # Try to load uploaded books data from a JSON file if it exists
         self._load_external_books()
     
-    def _load_external_books(self):
-        """Attempt to load book data from a JSON file (for integration with Supabase)"""
+    def _load_external_books(self, force_reload=False):
+        """
+        Attempt to load book data from a JSON file (for integration with Supabase)
+        
+        Args:
+            force_reload: Whether to force a reload from cache regardless of whether data is already loaded
+        """
         try:
             cache_file = os.path.join(os.path.dirname(__file__), "books_cache.json")
             if os.path.exists(cache_file):
@@ -88,7 +92,7 @@ Aurelius consistently returns to the importance of accepting what cannot be chan
                     # Add books to the in-memory database
                     if "books" in external_data:
                         for book_id, book_data in external_data["books"].items():
-                            if book_data.get("title") not in self.books:
+                            if book_data.get("title") not in self.books or force_reload:
                                 self.books[book_data["title"]] = {
                                     "id": book_id,
                                     "author": book_data.get("author", "Unknown"),
@@ -99,8 +103,8 @@ Aurelius consistently returns to the importance of accepting what cannot be chan
                     # Add chunks to the in-memory database
                     if "chunks" in external_data:
                         for chunk in external_data["chunks"]:
-                            # Skip if this chunk already exists
-                            if any(c.get("id") == chunk.get("id") for c in self.chunks):
+                            # Skip if this chunk already exists and not force reloading
+                            if not force_reload and any(c.get("id") == chunk.get("id") for c in self.chunks):
                                 continue
                             
                             self.chunks.append(chunk)
@@ -202,6 +206,41 @@ Aurelius consistently returns to the importance of accepting what cannot be chan
         
         return book_id
     
+    def add_chunk(self, book_id: str, chunk_index: int, title: str, text: str, author: str = "Unknown") -> int:
+        """
+        Add a chunk directly to the database
+        
+        Args:
+            book_id: ID of the book this chunk belongs to
+            chunk_index: Index of the chunk within the book
+            title: Book title
+            text: Chunk text content
+            author: Book author
+            
+        Returns:
+            Chunk ID
+        """
+        # Generate chunk ID
+        chunk_id = len(self.chunks)
+        
+        # Create the chunk
+        chunk = {
+            "id": chunk_id,
+            "book_id": book_id,
+            "title": title,
+            "author": author,
+            "text": text,
+            "chunk_index": chunk_index
+        }
+        
+        # Add to chunks list
+        self.chunks.append(chunk)
+        
+        # Try to save to cache
+        self._save_external_books()
+        
+        return chunk_id
+    
     def _save_external_books(self):
         """Save current books and chunks to a cache file for persistence"""
         try:
@@ -268,7 +307,21 @@ Aurelius consistently returns to the importance of accepting what cannot be chan
         
         return chunks
     
+    def get_book(self, book_id: str) -> Optional[Dict]:
+        """Get book data by ID"""
+        for title, data in self.books.items():
+            if data.get("id") == book_id:
+                return {
+                    "id": book_id,
+                    "title": title,
+                    "author": data["author"],
+                    "content": data.get("content", ""),
+                    "text": data.get("content", "")  # Alias for content
+                }
+        return None
+    
     def get_books(self) -> List[Dict]:
         """Get list of all books with metadata"""
         return [{"title": title, "author": data["author"], "id": data.get("id", str(uuid.uuid4()))} 
                 for title, data in self.books.items()]
+
