@@ -5,8 +5,10 @@ import os
 
 from app.routers import chat, books
 
-# Create uploads directory if it doesn't exist
+# Create necessary directories
 os.makedirs("app/uploads", exist_ok=True)
+os.makedirs("app/cache", exist_ok=True)
+os.makedirs("app/cache/screenshots", exist_ok=True)
 
 app = FastAPI(title="BookBodh API")
 

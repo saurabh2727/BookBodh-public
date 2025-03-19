@@ -1,3 +1,4 @@
+
 export type MessageType = 'user' | 'bot';
 
 export interface Citation {

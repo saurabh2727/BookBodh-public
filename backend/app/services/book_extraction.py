@@ -1,4 +1,3 @@
-
 import logging
 import os
 import time
@@ -35,12 +34,26 @@ class BookExtractor:
         Args:
             cache_dir: Directory to store screenshots and extracted text
         """
-        self.cache_dir = cache_dir or os.path.join(os.path.dirname(os.path.dirname(__file__)), "cache")
+        # Create app directory if it doesn't exist (should already exist, but just in case)
+        app_dir = os.path.dirname(os.path.dirname(__file__))
+        os.makedirs(app_dir, exist_ok=True)
+        
+        # Set default cache directory if none provided
+        if cache_dir is None:
+            cache_dir = os.path.join(app_dir, "cache")
+        
+        # Create cache directory structure
+        self.cache_dir = cache_dir
+        logger.info(f"Creating cache directory at: {self.cache_dir}")
         os.makedirs(self.cache_dir, exist_ok=True)
         
         # Create a dedicated screenshots directory
         self.screenshots_dir = os.path.join(self.cache_dir, "screenshots")
+        logger.info(f"Creating screenshots directory at: {self.screenshots_dir}")
         os.makedirs(self.screenshots_dir, exist_ok=True)
+        
+        # Log the final directory structure
+        logger.info(f"Cache directory structure initialized: {self.cache_dir} -> {self.screenshots_dir}")
         
         self.selenium_available = SELENIUM_AVAILABLE
     
