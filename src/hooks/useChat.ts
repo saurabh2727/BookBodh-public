@@ -18,11 +18,13 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
   const [error, setError] = useState<string | null>(null);
   const [extractionInProgress, setExtractionInProgress] = useState(false);
   const [extractionAttempts, setExtractionAttempts] = useState(0);
+  const [hasAttemptedLoad, setHasAttemptedLoad] = useState(false);
   const maxExtractionAttempts = 3;
 
   useEffect(() => {
     const loadBookChunks = async () => {
-      if (selectedBookId) {
+      if (selectedBookId && !hasAttemptedLoad) {
+        setHasAttemptedLoad(true);
         try {
           console.log('Fetching book chunks for:', selectedBookId);
           setError(null);
@@ -106,15 +108,21 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
             setExtractionInProgress(false);
           }
         }
-      } else {
+      } else if (!selectedBookId) {
         setBookChunks([]);
         setExtractionInProgress(false);
         setExtractionAttempts(0); // Reset on book change
+        setHasAttemptedLoad(false); // Reset when book id changes
       }
     };
 
     loadBookChunks();
-  }, [selectedBookId, selectedBook, extractionAttempts, messages.length]);
+  }, [selectedBookId, selectedBook, extractionAttempts]);
+
+  // Reset attempted load state when book changes
+  useEffect(() => {
+    setHasAttemptedLoad(false);
+  }, [selectedBookId]);
 
   const handleSubmit = async (query: string) => {
     if (!query.trim() || isLoading) return;

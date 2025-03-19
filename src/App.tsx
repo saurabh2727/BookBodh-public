@@ -11,6 +11,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import ChatInterface from './components/ChatInterface';
 import Diagnostics from './pages/Diagnostics';
 import './App.css';
+import { useParams } from 'react-router-dom';
 
 // Create a client
 const queryClient = new QueryClient({
@@ -72,8 +73,10 @@ function App() {
 }
 
 function ChatWithBook() {
-  const location = window.location;
-  const bookId = location.pathname.split('/').pop() || null;
+  // Use useParams instead of directly accessing window.location
+  const params = useParams();
+  const bookId = params.bookId || null;
+  
   return <ChatInterface selectedBookId={bookId} />;
 }
 
