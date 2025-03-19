@@ -34,26 +34,60 @@ class BookExtractor:
         Args:
             cache_dir: Directory to store screenshots and extracted text
         """
-        # Create app directory if it doesn't exist (should already exist, but just in case)
-        app_dir = os.path.dirname(os.path.dirname(__file__))
-        os.makedirs(app_dir, exist_ok=True)
+        # Get absolute paths for app directory
+        current_file = os.path.abspath(__file__)
+        services_dir = os.path.dirname(current_file)
+        app_dir = os.path.dirname(services_dir)
+        
+        logger.info(f"Initializing BookExtractor")
+        logger.info(f"Current file path: {current_file}")
+        logger.info(f"Services directory: {services_dir}")
+        logger.info(f"App directory: {app_dir}")
         
         # Set default cache directory if none provided
         if cache_dir is None:
             cache_dir = os.path.join(app_dir, "cache")
         
-        # Create cache directory structure
-        self.cache_dir = cache_dir
+        # Create cache directory structure using absolute paths
+        self.cache_dir = os.path.abspath(cache_dir)
         logger.info(f"Creating cache directory at: {self.cache_dir}")
-        os.makedirs(self.cache_dir, exist_ok=True)
+        
+        try:
+            os.makedirs(self.cache_dir, exist_ok=True)
+            logger.info(f"Cache directory created/exists: {os.path.exists(self.cache_dir)}")
+        except Exception as e:
+            logger.error(f"Error creating cache directory: {str(e)}")
         
         # Create a dedicated screenshots directory
         self.screenshots_dir = os.path.join(self.cache_dir, "screenshots")
         logger.info(f"Creating screenshots directory at: {self.screenshots_dir}")
-        os.makedirs(self.screenshots_dir, exist_ok=True)
         
-        # Log the final directory structure
-        logger.info(f"Cache directory structure initialized: {self.cache_dir} -> {self.screenshots_dir}")
+        try:
+            os.makedirs(self.screenshots_dir, exist_ok=True)
+            logger.info(f"Screenshots directory created/exists: {os.path.exists(self.screenshots_dir)}")
+        except Exception as e:
+            logger.error(f"Error creating screenshots directory: {str(e)}")
+        
+        # List all directories and files in the app directory to help debug
+        logger.info("Listing contents of app directory:")
+        try:
+            for item in os.listdir(app_dir):
+                item_path = os.path.join(app_dir, item)
+                item_type = "Directory" if os.path.isdir(item_path) else "File"
+                logger.info(f"  - {item_type}: {item}")
+        except Exception as e:
+            logger.error(f"Error listing app directory contents: {str(e)}")
+        
+        # List contents of cache directory if it exists
+        if os.path.exists(self.cache_dir):
+            logger.info(f"Listing contents of cache directory:")
+            try:
+                for item in os.listdir(self.cache_dir):
+                    item_path = os.path.join(self.cache_dir, item)
+                    item_type = "Directory" if os.path.isdir(item_path) else "File"
+                    logger.info(f"  - {item_type}: {item}")
+            except Exception as e:
+                logger.error(f"Error listing cache directory contents: {str(e)}")
         
         self.selenium_available = SELENIUM_AVAILABLE
     
