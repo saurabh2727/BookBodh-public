@@ -33,7 +33,13 @@ export const getAuthHeader = async () => {
     
     if (!data.session) {
       // Try to refresh the session if it's not found
-      const { data: refreshData } = await supabase.auth.refreshSession();
+      console.log('No active session found, attempting to refresh...');
+      const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+      
+      if (refreshError) {
+        console.error('Error refreshing session:', refreshError);
+        return undefined;
+      }
       
       // If we still don't have a session after attempting refresh
       if (!refreshData.session) {
@@ -42,7 +48,14 @@ export const getAuthHeader = async () => {
       }
       
       console.log('Session refreshed successfully');
-      return `Bearer ${refreshData.session.access_token}`;
+      
+      const token = refreshData.session.access_token;
+      if (!token) {
+        console.error('Refreshed session exists but no access token found');
+        return undefined;
+      }
+      
+      return `Bearer ${token}`;
     }
     
     const token = data.session.access_token;
@@ -66,14 +79,37 @@ export const getAuthHeader = async () => {
   }
 };
 
-// Add a function to check and refresh auth if needed
+// Enhanced function to check and refresh auth if needed
 export const ensureAuthIsValid = async () => {
   try {
-    const { data } = await supabase.auth.getSession();
+    console.log('Ensuring auth is valid...');
+    
+    // Get the current session
+    const { data, error } = await supabase.auth.getSession();
+    
+    if (error) {
+      console.error('Error getting session in ensureAuthIsValid:', error);
+      return false;
+    }
     
     if (!data.session) {
-      console.warn('No active session in ensureAuthIsValid');
-      return false;
+      console.warn('No active session in ensureAuthIsValid, attempting refresh...');
+      
+      // Try to refresh the session
+      const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+      
+      if (refreshError) {
+        console.error('Error refreshing session in ensureAuthIsValid:', refreshError);
+        return false;
+      }
+      
+      if (!refreshData.session) {
+        console.warn('No session after refresh attempt in ensureAuthIsValid');
+        return false;
+      }
+      
+      console.log('Session refreshed successfully in ensureAuthIsValid');
+      return true;
     }
     
     // Check if token is about to expire (within 5 minutes)
@@ -86,16 +122,46 @@ export const ensureAuthIsValid = async () => {
       const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
       
       if (refreshError) {
-        console.error('Error refreshing session:', refreshError);
+        console.error('Error refreshing near-expiry session:', refreshError);
         return false;
       }
       
-      console.log('Session refreshed successfully');
+      if (!refreshData.session) {
+        console.warn('No session after near-expiry refresh attempt');
+        return false;
+      }
+      
+      console.log('Near-expiry session refreshed successfully');
     }
     
     return true;
   } catch (error) {
     console.error('Error in ensureAuthIsValid:', error);
+    return false;
+  }
+};
+
+// Helper function to force a token refresh - can be called before operations that require auth
+export const forceSessionRefresh = async () => {
+  try {
+    console.log('Forcing session refresh...');
+    const { data, error } = await supabase.auth.refreshSession();
+    
+    if (error) {
+      console.error('Error forcing session refresh:', error);
+      return false;
+    }
+    
+    if (!data.session) {
+      console.error('No session after forced refresh');
+      return false;
+    }
+    
+    console.log('Forced session refresh successful, new token expires at:', 
+      new Date(data.session.expires_at * 1000).toLocaleString());
+    return true;
+  } catch (error) {
+    console.error('Unexpected error in forceSessionRefresh:', error);
     return false;
   }
 };

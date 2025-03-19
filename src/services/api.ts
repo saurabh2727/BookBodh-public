@@ -1,5 +1,5 @@
 import { ChatRequest, ChatResponse, Book } from '../types';
-import { supabase, getAuthHeader, ensureAuthIsValid } from '@/lib/supabase';
+import { supabase, getAuthHeader, ensureAuthIsValid, forceSessionRefresh } from '@/lib/supabase';
 
 /**
  * Sends a chat request to the Supabase Edge Function
@@ -12,16 +12,21 @@ export const sendChatRequest = async (request: ChatRequest): Promise<ChatRespons
     console.log('Request payload:', JSON.stringify(request));
     
     // Ensure auth is valid before proceeding
-    await ensureAuthIsValid();
+    const isAuthValid = await ensureAuthIsValid();
+    if (!isAuthValid) {
+      console.error('Authentication validation failed before chat request');
+      throw new Error('User authentication failed. Please log in again.');
+    }
     
     // Get the auth header
     const authHeader = await getAuthHeader();
     
     if (!authHeader) {
+      console.error('No auth header available for chat request');
       throw new Error('User not authenticated');
     }
     
-    console.log('Got auth header, token length:', authHeader.length);
+    console.log('Got auth header for chat request, token length:', authHeader.length);
     
     try {
       const { data, error } = await supabase.functions.invoke('chat-response', {
@@ -42,6 +47,36 @@ export const sendChatRequest = async (request: ChatRequest): Promise<ChatRespons
     } catch (invokeError) {
       console.error('Error invoking Edge Function:', invokeError);
       console.error('Error details:', JSON.stringify(invokeError, null, 2));
+      
+      // If the error might be auth-related, try refreshing the session once
+      if (invokeError.message?.includes('auth') || 
+          invokeError.message?.includes('token') || 
+          invokeError.message?.includes('session')) {
+        
+        console.log('Attempting to refresh session and retry chat request...');
+        await forceSessionRefresh();
+        
+        const newAuthHeader = await getAuthHeader();
+        if (!newAuthHeader) {
+          throw new Error('Failed to refresh authentication');
+        }
+        
+        // Retry the request with fresh token
+        const { data, error } = await supabase.functions.invoke('chat-response', {
+          method: 'POST',
+          body: request,
+          headers: {
+            Authorization: newAuthHeader,
+          },
+        });
+        
+        if (error) {
+          throw new Error(error.message || 'Error calling chat response function after refresh');
+        }
+        
+        return data as ChatResponse;
+      }
+      
       throw new Error(`Failed to invoke Edge Function: ${invokeError.message}`);
     }
   } catch (error) {
@@ -83,26 +118,30 @@ export const uploadBook = async (
       };
     }
     
-    // Ensure auth is valid before proceeding
-    const isAuthValid = await ensureAuthIsValid();
-    if (!isAuthValid) {
-      console.error('Auth validation failed, attempting to refresh session...');
-      // Try to sign in again with the stored credentials if available
-      await supabase.auth.refreshSession();
+    // Force session refresh before proceeding
+    console.log('API: Forcing session refresh before book upload...');
+    const refreshSuccess = await forceSessionRefresh();
+    
+    if (!refreshSuccess) {
+      console.error('API: Failed to refresh session');
+      return { 
+        success: false, 
+        message: 'Authentication error. Please log in again before uploading.' 
+      };
     }
     
-    // Get the auth header using the exported function from lib/supabase
+    // Get a fresh auth header
     const authHeader = await getAuthHeader();
     
     if (!authHeader) {
-      console.error('No authorization header available');
+      console.error('API: No authorization header available after refresh');
       return { 
         success: false, 
         message: 'User not authenticated. Please log in again.' 
       };
     }
     
-    console.log('Auth header obtained, length:', authHeader.length);
+    console.log('API: Auth header obtained for upload, length:', authHeader.length);
     
     // Create a FormData object
     const formData = new FormData();
@@ -155,6 +194,63 @@ export const uploadBook = async (
     } catch (invokeError) {
       console.error('Error during upload process:', invokeError);
       console.error('Error details:', JSON.stringify(invokeError, null, 2));
+      
+      // Try to refresh the token and retry if it looks like an auth error
+      if (invokeError instanceof Error && 
+          (invokeError.message.includes('auth') || 
+           invokeError.message.includes('token') || 
+           invokeError.message.includes('session'))) {
+        
+        console.log('API: Attempting one more session refresh and retry...');
+        await forceSessionRefresh();
+        
+        const newAuthHeader = await getAuthHeader();
+        if (!newAuthHeader) {
+          return { 
+            success: false, 
+            message: 'Authentication failed. Please log in again.' 
+          };
+        }
+        
+        // Retry the upload with the new token
+        try {
+          const { data, error } = await supabase.functions.invoke('upload-book', {
+            body: formData,
+            method: 'POST',
+            headers: {
+              Authorization: newAuthHeader
+            }
+          });
+          
+          if (error) {
+            return {
+              success: false,
+              message: `Upload error after refresh: ${error.message || 'Unknown error'}`
+            };
+          }
+          
+          if (!data.success) {
+            return {
+              success: false,
+              message: data.error || 'Upload failed on server after token refresh'
+            };
+          }
+          
+          return {
+            success: true,
+            message: data.message || `Book "${title}" uploaded successfully`,
+            bookId: data.bookId,
+            chunksCount: data.chunksCount,
+            fileUrl: data.fileUrl
+          };
+        } catch (retryError) {
+          console.error('Retry upload failed:', retryError);
+          return { 
+            success: false, 
+            message: 'Upload failed even after authentication refresh. Please try again later.' 
+          };
+        }
+      }
       
       if (invokeError instanceof Error) {
         if (invokeError.message.includes('NetworkError') || invokeError.message.includes('Load failed')) {

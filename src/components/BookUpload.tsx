@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -13,7 +13,7 @@ import {
 import { Loader2, AlertCircle, Check, Search } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { toast } from "@/hooks/use-toast";
-import { supabase } from '@/lib/supabase';
+import { supabase, ensureAuthIsValid } from '@/lib/supabase';
 
 interface BookUploadProps {
   onClose: () => void;
@@ -30,6 +30,31 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
   const [bookId, setBookId] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [selectedBook, setSelectedBook] = useState<any | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+
+  // Check authentication status on component mount
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        console.log('BookUpload: Checking authentication status...');
+        const { data } = await supabase.auth.getSession();
+        
+        const isValid = !!data.session;
+        console.log('BookUpload: Authentication status:', isValid ? 'Authenticated' : 'Not authenticated');
+        setIsAuthenticated(isValid);
+        
+        if (!isValid) {
+          setError('Authentication required. Please log in again.');
+          console.error('BookUpload: No valid session found');
+        }
+      } catch (error) {
+        console.error('BookUpload: Error checking authentication:', error);
+        setError('Error checking authentication status.');
+      }
+    };
+    
+    checkAuth();
+  }, []);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,6 +74,17 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
       setSelectedBook(null);
       
       console.log('Searching for books with query:', searchQuery);
+      
+      // Ensure we have a valid auth session before proceeding
+      if (!isAuthenticated) {
+        console.log('BookUpload: Attempting to refresh auth before search...');
+        const isValid = await ensureAuthIsValid();
+        
+        if (!isValid) {
+          throw new Error('Authentication required. Please log in again.');
+        }
+        setIsAuthenticated(true);
+      }
       
       // Use the Edge Function to search for books
       const { data, error } = await supabase.functions.invoke('search-books', {
@@ -110,7 +146,25 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
       
       console.log('Adding book to library:', selectedBook.volumeInfo.title);
       
-      // Use the Edge Function to add the book
+      // Ensure valid authentication before proceeding
+      console.log('BookUpload: Validating auth session before adding book...');
+      const isValid = await ensureAuthIsValid();
+      if (!isValid) {
+        console.error('BookUpload: Authentication validation failed');
+        throw new Error('Authentication required. Please log in again.');
+      }
+      
+      // Get a fresh auth session
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session) {
+        console.error('BookUpload: No active session found after refresh');
+        throw new Error('Authentication session missing. Please log in again.');
+      }
+      
+      console.log('BookUpload: Auth validated, token present with length:', 
+        sessionData.session.access_token.length);
+      
+      // Use the Edge Function to add the book with explicit auth token
       const { data, error } = await supabase.functions.invoke('add-book', {
         method: 'POST',
         body: { 
@@ -120,6 +174,9 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
           category: category,
           previewLink: selectedBook.volumeInfo.previewLink
         },
+        headers: {
+          Authorization: `Bearer ${sessionData.session.access_token}`
+        }
       });
 
       if (error) {
@@ -151,7 +208,7 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
       
       toast({
         title: "Add book error",
-        description: "An unexpected error occurred. Please try again.",
+        description: errorMessage || "An unexpected error occurred. Please try again.",
         variant: "destructive",
       });
       
