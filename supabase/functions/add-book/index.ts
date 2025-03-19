@@ -131,6 +131,16 @@ serve(async (req) => {
     // Generate a UUID for the book
     const newBookId = crypto.randomUUID();
     
+    // Log database operation attempt
+    console.log("Attempting to insert book with following data:", {
+      id: newBookId,
+      title: title,
+      author: Array.isArray(authors) ? authors.join(", ") : authors || "Unknown",
+      category: category || "Uncategorized",
+      file_url: previewLink, // Using previewLink as file_url since there's no preview_link column
+      user_id: userId
+    });
+    
     // Add book to database
     const { data, error } = await supabaseAdmin
       .from("books")
@@ -139,7 +149,7 @@ serve(async (req) => {
         title: title,
         author: Array.isArray(authors) ? authors.join(", ") : authors || "Unknown",
         category: category || "Uncategorized",
-        preview_link: previewLink,
+        file_url: previewLink, // Changed from preview_link to file_url to match the schema
         user_id: userId,
         status: "active",
         summary: `Book added from Google Books: ${title}`,
