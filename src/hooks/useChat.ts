@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { ChatMessage } from '../types';
@@ -18,7 +17,6 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
   const [error, setError] = useState<string | null>(null);
   const [extractionInProgress, setExtractionInProgress] = useState(false);
 
-  // Fetch book chunks when a book ID is selected
   useEffect(() => {
     const loadBookChunks = async () => {
       if (selectedBookId) {
@@ -30,10 +28,8 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
           if (!chunks || chunks.length === 0) {
             console.warn('No chunks found for book ID:', selectedBookId);
             
-            // Set extraction in progress flag
             setExtractionInProgress(true);
             
-            // Add a message about content extraction
             setMessages(prev => [
               ...prev,
               {
@@ -45,19 +41,16 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
               }
             ]);
             
-            // Set a small empty array of chunks - the backend will handle extraction on first query
             setBookChunks([]);
           } else {
             console.log(`Loaded ${chunks.length} chunks for book ID: ${selectedBookId}`);
             console.log('Sample chunk:', chunks[0]);
             
-            // Clear extraction flag if we have chunks
             setExtractionInProgress(false);
             
-            // When a new book is selected, add a welcome message for that book
             if (messages.length <= 1 || messages[messages.length - 1].type === 'user') {
               setMessages(prev => [
-                ...prev.filter(msg => !msg.isBookWelcome), // Remove any previous book welcome messages
+                ...prev.filter(msg => !msg.isBookWelcome),
                 {
                   id: uuidv4(),
                   content: `I'm ready to help you with "${selectedBook}". What would you like to know about this book?`,
@@ -75,7 +68,6 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
           setError('Failed to load book data. Please try again later.');
         }
       } else {
-        // Reset when no book ID is selected
         setBookChunks([]);
         setExtractionInProgress(false);
       }
@@ -87,10 +79,8 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
   const handleSubmit = async (query: string) => {
     if (!query.trim() || isLoading) return;
     
-    // Reset any previous errors
     setError(null);
 
-    // Add user message
     const userMessage: ChatMessage = {
       id: uuidv4(),
       content: query,
@@ -100,7 +90,6 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
 
     setMessages((prev) => [...prev, userMessage]);
 
-    // Add loading message
     const loadingMessageId = uuidv4();
     const loadingMessage: ChatMessage = {
       id: loadingMessageId,
@@ -114,7 +103,6 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
     setIsLoading(true);
 
     try {
-      // If extraction is in progress, add an additional notice
       if (extractionInProgress && selectedBookId) {
         const extractionMessageId = uuidv4();
         setMessages((prev) => [
@@ -130,7 +118,6 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
         ]);
       }
       
-      // Prepare the request payload with book chunks if book is selected
       const requestPayload = {
         query,
         book: selectedBook,
@@ -154,7 +141,6 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
       
       const response = await sendChatRequest(requestPayload);
 
-      // If we received a response and had no chunks before, try to fetch chunks again
       if (response && extractionInProgress && selectedBookId) {
         try {
           const updatedChunks = await fetchBookChunks(selectedBookId);
@@ -163,7 +149,6 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
             setBookChunks(updatedChunks);
             setExtractionInProgress(false);
             
-            // Add a success message
             setMessages((prev) => [
               ...prev.filter(msg => !msg.isExtractionComplete),
               {
@@ -181,7 +166,6 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
         }
       }
 
-      // Replace loading message with response
       setMessages((prev) =>
         prev.map((msg) =>
           msg.id === loadingMessageId
@@ -195,7 +179,7 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
                       {
                         book: response.book,
                         author: response.author || 'Unknown',
-                        page: 1, // Page number not available from current API
+                        page: 1,
                       },
                     ]
                   : undefined,
@@ -210,7 +194,6 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
         ? error.message
         : "I'm sorry, I couldn't process your request. Please try again later.";
       
-      // Replace loading message with error message
       setMessages((prev) =>
         prev.map((msg) =>
           msg.id === loadingMessageId

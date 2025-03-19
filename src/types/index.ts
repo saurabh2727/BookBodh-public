@@ -33,10 +33,8 @@ export interface Book {
 
 export type BookGenre = 'Fiction' | 'Non-Fiction' | 'Philosophy' | 'Science' | 'History';
 
-// Chat mode types - unified definition
 export type ChatMode = 'general' | 'specific-book' | 'saved' | 'temp';
 
-// API Request/Response Types for Backend Integration
 export interface ChatRequest {
   query: string;
   book?: string | null;
