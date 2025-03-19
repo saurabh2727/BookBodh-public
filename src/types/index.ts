@@ -9,11 +9,14 @@ export interface Citation {
 export interface ChatMessage {
   id: string;
   content: string;
-  type: MessageType;
+  type: 'user' | 'bot';
   timestamp: Date;
-  citations?: Citation[];
   isLoading?: boolean;
+  citations?: Citation[];
+  isSystemMessage?: boolean;
   isBookWelcome?: boolean;
+  isExtractionStatus?: boolean;
+  isExtractionComplete?: boolean;
 }
 
 export interface Book {
