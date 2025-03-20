@@ -120,7 +120,7 @@ serve(async (req) => {
           category: category,
           icon_url: previewLink,
           file_url: fileUrl, // Using the Google Books URL as the file URL
-          status: 'pending',
+          status: 'extracting', // Set status to extracting immediately
           external_id: originalBookId, // Store the original Google Books ID
           user_id: userId // Make sure to include the user ID
         },
@@ -148,11 +148,11 @@ serve(async (req) => {
       EdgeRuntime.waitUntil((async () => {
         const extractionStarted = await triggerExtraction(addedBookId, originalBookId);
         
-        if (extractionStarted) {
-          // Update the book with extraction status
+        if (!extractionStarted) {
+          // Update the book with error status if extraction failed to start
           await supabase
             .from('books')
-            .update({ status: 'extracting' })
+            .update({ status: 'error', summary: 'Failed to start extraction process' })
             .eq('id', addedBookId);
         }
       })());
@@ -163,7 +163,8 @@ serve(async (req) => {
           message: `Book "${title}" added successfully and extraction started`,
           bookId: addedBookId,
           title: title,
-          extractionTriggered: true
+          extractionTriggered: true,
+          status: 'extracting'
         }),
         {
           status: 200,

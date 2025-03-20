@@ -31,6 +31,8 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [selectedBook, setSelectedBook] = useState<any | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [extractionStatus, setExtractionStatus] = useState<'pending' | 'extracting' | 'complete' | 'error' | null>(null);
+  const [isPolling, setIsPolling] = useState(false);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -55,6 +57,84 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
     checkAuth();
   }, []);
 
+  // Poll for book extraction status
+  useEffect(() => {
+    let pollingInterval: number | null = null;
+    
+    const checkExtractionStatus = async () => {
+      if (bookId && (extractionStatus === 'extracting' || extractionStatus === 'pending')) {
+        try {
+          const { data, error } = await supabase
+            .from('books')
+            .select('status, chunks_count')
+            .eq('id', bookId)
+            .single();
+          
+          if (error) {
+            console.error('Error polling book status:', error);
+            return;
+          }
+          
+          if (data) {
+            console.log(`Book status update: ${data.status}, chunks: ${data.chunks_count}`);
+            
+            if (data.status === 'processed' && data.chunks_count > 0) {
+              setExtractionStatus('complete');
+              setIsPolling(false);
+              
+              toast({
+                title: "Extraction complete",
+                description: `Book processing completed with ${data.chunks_count} chunks extracted.`,
+                variant: "default",
+              });
+              
+              // Update success message
+              if (uploadSuccess && selectedBook) {
+                onUploadComplete(true, `Book "${selectedBook.volumeInfo.title}" added and processed successfully with ${data.chunks_count} chunks`, bookId);
+              }
+              
+              // Clear the interval
+              if (pollingInterval) {
+                window.clearInterval(pollingInterval);
+                pollingInterval = null;
+              }
+            } else if (data.status === 'error') {
+              setExtractionStatus('error');
+              setIsPolling(false);
+              
+              toast({
+                title: "Extraction error",
+                description: "There was an error processing the book content.",
+                variant: "destructive",
+              });
+              
+              // Clear the interval
+              if (pollingInterval) {
+                window.clearInterval(pollingInterval);
+                pollingInterval = null;
+              }
+            } else if (data.status === 'extracting') {
+              setExtractionStatus('extracting');
+            }
+          }
+        } catch (err) {
+          console.error('Error checking book extraction status:', err);
+        }
+      }
+    };
+    
+    if (isPolling && bookId) {
+      checkExtractionStatus(); // Check immediately
+      pollingInterval = window.setInterval(checkExtractionStatus, 5000); // Then every 5 seconds
+    }
+    
+    return () => {
+      if (pollingInterval) {
+        window.clearInterval(pollingInterval);
+      }
+    };
+  }, [bookId, isPolling, extractionStatus, uploadSuccess, selectedBook, onUploadComplete]);
+
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -71,6 +151,7 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
       setBookId(null);
       setSearchResults([]);
       setSelectedBook(null);
+      setExtractionStatus(null);
       
       console.log('Searching for books with query:', searchQuery);
       
@@ -139,6 +220,7 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
       setIsSearching(true);
       setError(null);
       setDetailedError(null);
+      setExtractionStatus('pending');
       
       console.log('Adding book to library:', selectedBook.volumeInfo.title);
       
@@ -190,14 +272,16 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
       if (data.success) {
         setUploadSuccess(true);
         setBookId(data.bookId || null);
+        setExtractionStatus(data.status === 'extracting' ? 'extracting' : 'pending');
+        setIsPolling(true);
         
         toast({
           title: "Book added successfully",
-          description: `"${selectedBook.volumeInfo.title}" has been added to your library and extraction has been triggered.`,
+          description: `"${selectedBook.volumeInfo.title}" has been added to your library and is now being processed. This may take a minute or two.`,
           variant: "default",
         });
         
-        onUploadComplete(true, `Book "${selectedBook.volumeInfo.title}" added successfully${data.extractionTriggered ? ' and extraction started' : ''}`, data.bookId);
+        onUploadComplete(true, `Book "${selectedBook.volumeInfo.title}" added successfully and is now being processed. Please wait...`, data.bookId);
       } else {
         throw new Error(data.message || 'Failed to add book');
       }
@@ -206,6 +290,7 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       setError('Failed to add book. Please try again.');
       setDetailedError(errorMessage);
+      setExtractionStatus('error');
       
       toast({
         title: "Add book error",
@@ -218,6 +303,23 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
       setIsSearching(false);
     }
   };
+
+  const getExtractionStatusMessage = () => {
+    switch (extractionStatus) {
+      case 'pending':
+        return "Book added. Preparing to extract content...";
+      case 'extracting':
+        return "Extracting and processing book content. This may take a minute or two...";
+      case 'complete':
+        return "Book content processed successfully! You can now chat with this book.";
+      case 'error':
+        return "There was an error processing the book content. You may still be able to chat with it using general knowledge.";
+      default:
+        return null;
+    }
+  };
+
+  const extractionStatusMessage = getExtractionStatusMessage();
 
   return (
     <div className="space-y-4">
@@ -349,16 +451,38 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
       )}
       
       {uploadSuccess && (
-        <Alert variant="default" className="bg-green-50 border-green-200">
-          <Check className="h-4 w-4 text-green-600" />
-          <AlertTitle className="text-green-800">Success</AlertTitle>
-          <AlertDescription className="text-green-700">
-            Book "{selectedBook.volumeInfo.title}" added successfully!
-            {bookId && (
-              <div className="mt-1 text-xs">
-                Book ID: <span className="font-mono">{bookId}</span>
-              </div>
-            )}
+        <Alert variant={extractionStatus === 'error' ? "destructive" : extractionStatus === 'complete' ? "default" : "default"} 
+          className={extractionStatus === 'complete' ? "bg-green-50 border-green-200" : 
+                     extractionStatus === 'error' ? "bg-red-50 border-red-200" : 
+                     "bg-blue-50 border-blue-200"}>
+          {extractionStatus === 'complete' ? (
+            <Check className="h-4 w-4 text-green-600" />
+          ) : extractionStatus === 'error' ? (
+            <AlertCircle className="h-4 w-4 text-red-600" />
+          ) : (
+            <Loader2 className="h-4 w-4 text-blue-600 animate-spin" />
+          )}
+          <AlertTitle className={extractionStatus === 'complete' ? "text-green-800" : 
+                                extractionStatus === 'error' ? "text-red-800" : 
+                                "text-blue-800"}>
+            {extractionStatus === 'complete' ? "Success" : 
+             extractionStatus === 'error' ? "Extraction Error" : 
+             "Processing"}
+          </AlertTitle>
+          <AlertDescription className={extractionStatus === 'complete' ? "text-green-700" : 
+                                      extractionStatus === 'error' ? "text-red-700" : 
+                                      "text-blue-700"}>
+            <div>
+              Book "{selectedBook.volumeInfo.title}" added successfully!
+              {extractionStatusMessage && (
+                <div className="mt-1 text-sm">{extractionStatusMessage}</div>
+              )}
+              {bookId && (
+                <div className="mt-1 text-xs">
+                  Book ID: <span className="font-mono">{bookId}</span>
+                </div>
+              )}
+            </div>
           </AlertDescription>
         </Alert>
       )}

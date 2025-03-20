@@ -17,13 +17,13 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
   const [bookChunks, setBookChunks] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [extractionInProgress, setExtractionInProgress] = useState(false);
-  const [extractionAttempts, setExtractionAttempts] = useState(0);
   const [hasAttemptedLoad, setHasAttemptedLoad] = useState(false);
-  const [lastExtractionTime, setLastExtractionTime] = useState<number | null>(null);
-  const maxExtractionAttempts = 3;
-  const extractionCooldownMs = 10000; // 10 seconds between extraction attempts
+  const [bookStatus, setBookStatus] = useState<string | null>(null);
+  const extractionPollingInterval = 5000; // Poll every 5 seconds for extraction status
 
   useEffect(() => {
+    let pollingTimer: number | null = null;
+
     const loadBookChunks = async () => {
       if (selectedBookId && !hasAttemptedLoad) {
         setHasAttemptedLoad(true);
@@ -35,36 +35,51 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
           if (!chunks || chunks.length === 0) {
             console.warn('No chunks found for book ID:', selectedBookId);
             
-            if (extractionAttempts < maxExtractionAttempts) {
-              setExtractionInProgress(true);
-              setExtractionAttempts(prev => prev + 1);
-              
-              setMessages(prev => [
-                ...prev,
-                {
-                  id: uuidv4(),
-                  content: "I'm extracting content from this book. This might take a minute or two for the first question. The system will take screenshots of the book preview and use OCR to extract the text.",
-                  type: 'bot',
-                  timestamp: new Date(),
-                  isSystemMessage: true,
-                  isExtractionStatus: true
+            // Check if extraction is in progress rather than triggering a new one
+            setExtractionInProgress(true);
+            
+            setMessages(prev => [
+              ...prev,
+              {
+                id: uuidv4(),
+                content: "I'm waiting for this book's content to be processed. This might take a minute or two. Please wait while the content is being extracted.",
+                type: 'bot',
+                timestamp: new Date(),
+                isSystemMessage: true,
+                isExtractionStatus: true
+              }
+            ]);
+            
+            // Start polling for updates
+            if (!pollingTimer) {
+              pollingTimer = window.setInterval(async () => {
+                console.log('Polling for book chunks...');
+                try {
+                  const updatedChunks = await fetchBookChunks(selectedBookId);
+                  if (updatedChunks && updatedChunks.length > 0) {
+                    console.log(`Found ${updatedChunks.length} chunks on polling`);
+                    setBookChunks(updatedChunks);
+                    setExtractionInProgress(false);
+                    window.clearInterval(pollingTimer!);
+                    pollingTimer = null;
+                    
+                    setMessages(prev => [
+                      ...prev.filter(msg => !msg.isExtractionComplete && !msg.isExtractionStatus),
+                      {
+                        id: uuidv4(),
+                        content: `Book content has been processed successfully. I'm ready to answer your questions about "${selectedBook}".`,
+                        type: 'bot',
+                        timestamp: new Date(),
+                        isSystemMessage: true,
+                        isExtractionComplete: true,
+                        isBookWelcome: true
+                      }
+                    ]);
+                  }
+                } catch (err) {
+                  console.error('Error polling for book chunks:', err);
                 }
-              ]);
-            } else {
-              console.error(`Extraction failed after ${maxExtractionAttempts} attempts`);
-              setExtractionInProgress(false);
-              
-              setMessages(prev => [
-                ...prev,
-                {
-                  id: uuidv4(),
-                  content: `I was unable to extract text from this book after multiple attempts. The book may not have a preview available on Google Books, or there might be an issue with the extraction process. Please try asking a general question instead.`,
-                  type: 'bot',
-                  timestamp: new Date(),
-                  isSystemMessage: true,
-                  isExtractionError: true
-                }
-              ]);
+              }, extractionPollingInterval);
             }
             
             setBookChunks([]);
@@ -73,7 +88,6 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
             console.log('Sample chunk:', chunks[0]);
             
             setExtractionInProgress(false);
-            setExtractionAttempts(0); // Reset extraction attempts on success
             
             if (messages.length <= 1 || messages[messages.length - 1].type === 'user') {
               setMessages(prev => [
@@ -113,14 +127,25 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
       } else if (!selectedBookId) {
         setBookChunks([]);
         setExtractionInProgress(false);
-        setExtractionAttempts(0); // Reset on book change
         setHasAttemptedLoad(false); // Reset when book id changes
-        setLastExtractionTime(null); // Reset extraction time
+        
+        // Clear the polling timer if it exists
+        if (pollingTimer) {
+          window.clearInterval(pollingTimer);
+          pollingTimer = null;
+        }
       }
     };
 
     loadBookChunks();
-  }, [selectedBookId, selectedBook, extractionAttempts]);
+
+    // Clean up polling timer on unmount
+    return () => {
+      if (pollingTimer) {
+        window.clearInterval(pollingTimer);
+      }
+    };
+  }, [selectedBookId, selectedBook, messages]);
 
   // Reset attempted load state when book changes
   useEffect(() => {
@@ -160,7 +185,7 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
           ...prev.filter(msg => !msg.isExtractionStatus),
           {
             id: extractionMessageId,
-            content: "Content extraction is in progress. The system is taking screenshots and processing them with OCR. Your response might be based on partial book content until extraction completes.",
+            content: "The book's content is still being processed. I'll do my best to answer your question based on general knowledge, but I might not have specific details from the book yet.",
             type: 'bot',
             timestamp: new Date(),
             isSystemMessage: true,
@@ -192,78 +217,31 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
       
       const response = await sendChatRequest(requestPayload);
 
-      // Check if extraction was triggered by the edge function
-      if (response && response.extractionTriggered) {
-        console.log('Extraction was triggered by the edge function');
-        
-        // Set extraction state and update last extraction time
-        setExtractionInProgress(true);
-        setLastExtractionTime(Date.now());
-        
-        // Show extraction message if not already shown
-        const hasExtractionMessage = messages.some(msg => msg.isExtractionStatus);
-        if (!hasExtractionMessage) {
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: uuidv4(),
-              content: "Content extraction has been initiated. This process will take a minute or two. Please try your question again shortly.",
-              type: 'bot',
-              timestamp: new Date(),
-              isSystemMessage: true,
-              isExtractionStatus: true
-            }
-          ]);
-        }
-      }
-
-      if (response && extractionInProgress && selectedBookId) {
-        // Check if we should attempt to fetch chunks
-        const now = Date.now();
-        const shouldCheckChunks = !lastExtractionTime || (now - lastExtractionTime) > extractionCooldownMs;
-        
-        if (shouldCheckChunks) {
-          try {
-            console.log('Checking for newly extracted chunks');
-            setLastExtractionTime(now);
+      // If we're still polling for extraction results, check for new chunks
+      if (extractionInProgress && selectedBookId) {
+        try {
+          console.log('Checking for newly extracted chunks');
+          
+          const updatedChunks = await fetchBookChunks(selectedBookId);
+          if (updatedChunks && updatedChunks.length > 0) {
+            console.log(`Now loaded ${updatedChunks.length} chunks after checking`);
+            setBookChunks(updatedChunks);
+            setExtractionInProgress(false);
             
-            const updatedChunks = await fetchBookChunks(selectedBookId);
-            if (updatedChunks && updatedChunks.length > 0) {
-              console.log(`Now loaded ${updatedChunks.length} chunks after extraction`);
-              setBookChunks(updatedChunks);
-              setExtractionInProgress(false);
-              setExtractionAttempts(0); // Reset on successful extraction
-              
-              setMessages((prev) => [
-                ...prev.filter(msg => !msg.isExtractionComplete),
-                {
-                  id: uuidv4(),
-                  content: `Content extraction completed successfully. Extracted ${updatedChunks.length} chunks from the book.`,
-                  type: 'bot',
-                  timestamp: new Date(),
-                  isSystemMessage: true,
-                  isExtractionComplete: true
-                }
-              ]);
-            } else if (extractionAttempts >= maxExtractionAttempts) {
-              console.warn(`Still no chunks after ${extractionAttempts} attempts`);
-              setExtractionInProgress(false);
-              
-              setMessages((prev) => [
-                ...prev.filter(msg => !msg.isExtractionError),
-                {
-                  id: uuidv4(),
-                  content: `I was unable to extract text from this book after multiple attempts. The book may not have a preview available, or there might be an issue with the extraction process.`,
-                  type: 'bot',
-                  timestamp: new Date(),
-                  isSystemMessage: true,
-                  isExtractionError: true
-                }
-              ]);
-            }
-          } catch (chunkError) {
-            console.error('Error checking for updated chunks:', chunkError);
+            setMessages((prev) => [
+              ...prev.filter(msg => !msg.isExtractionComplete),
+              {
+                id: uuidv4(),
+                content: `Content extraction completed successfully. I can now answer questions about the book in detail.`,
+                type: 'bot',
+                timestamp: new Date(),
+                isSystemMessage: true,
+                isExtractionComplete: true
+              }
+            ]);
           }
+        } catch (chunkError) {
+          console.error('Error checking for updated chunks:', chunkError);
         }
       }
 
