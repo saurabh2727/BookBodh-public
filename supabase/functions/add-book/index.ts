@@ -1,8 +1,9 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.38.4";
+import { v4 as uuidv4 } from "https://esm.sh/uuid@11.0.0";
 
-// This is a new helper function to trigger extraction for a newly added book
+// This is a helper function to trigger extraction for a newly added book
 async function triggerExtraction(bookId: string) {
   try {
     console.log(`Triggering extraction for book ${bookId}`);
@@ -42,10 +43,10 @@ serve(async (req) => {
   }
 
   try {
-    const { bookId, title, authors, category, previewLink } = await req.json();
+    const { bookId: originalBookId, title, authors, category, previewLink } = await req.json();
 
     // Validate that required data is present
-    if (!bookId || !title || !authors || !category) {
+    if (!originalBookId || !title || !authors || !category) {
       return new Response(
         JSON.stringify({ error: "Missing required data" }),
         {
@@ -54,6 +55,11 @@ serve(async (req) => {
         }
       );
     }
+
+    // Generate a proper UUID to use as the database ID
+    // Keep the original bookId as an external_id or source_id field
+    const generatedUuid = uuidv4();
+    console.log(`Original book ID: ${originalBookId}, Generated UUID: ${generatedUuid}`);
 
     // Initialize Supabase client
     const supabase = createClient(
@@ -68,25 +74,26 @@ serve(async (req) => {
       }
     );
 
-    // Add book to database
+    // Add book to database using the generated UUID
     const { data, error } = await supabase
       .from("books")
       .insert([
         {
-          id: bookId,
+          id: generatedUuid,
           title: title,
           author: authors.join(", "),
           category: category,
           icon_url: previewLink,
-          status: 'pending'
+          status: 'pending',
+          external_id: originalBookId // Store the original Google Books ID
         },
       ])
-      .select()
+      .select();
 
     if (error) {
       console.error("Error adding book:", error);
       return new Response(
-        JSON.stringify({ error: "Failed to add book" }),
+        JSON.stringify({ error: `Failed to add book: ${error}` }),
         {
           status: 500,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
