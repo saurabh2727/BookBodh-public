@@ -1,4 +1,3 @@
-
 export type MessageType = 'user' | 'bot';
 
 export interface Citation {
@@ -53,6 +52,10 @@ export interface ChatResponse {
   response: string;
   book?: string | null;
   author?: string | null;
+  extractionTriggered?: boolean;
+  status?: string;
+  bookId?: string;
+  chunksCount?: number;
 }
 
 export interface BookChunk {
