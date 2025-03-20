@@ -76,6 +76,9 @@ def retrieve_chunks(query: str, book: Optional[str] = None, book_id: Optional[st
                 # Check if this is a Google Books ID
                 google_books_id = None
                 file_url = book_data.get('file_url', '')
+                
+                logger.info(f"Book file URL: {file_url}")
+                
                 if 'books.google' in file_url or 'play.google' in file_url:
                     # Try to extract Google Books ID from URL
                     if 'id=' in file_url:
@@ -86,6 +89,11 @@ def retrieve_chunks(query: str, book: Optional[str] = None, book_id: Optional[st
                         parts = file_url.split('/books/edition/')
                         if len(parts) > 1 and '/' in parts[1]:
                             google_books_id = parts[1].split('/')[0]
+                    
+                    logger.info(f"Extracted Google Books ID: {google_books_id}")
+                else:
+                    # For other file types (like PDF uploads), try to use the book_id directly
+                    logger.info(f"Not a Google Books URL, will use book_id for extraction: {book_id}")
                 
                 # If we have a Google Books ID or can use the book_id directly
                 extraction_id = google_books_id or book_id
@@ -119,13 +127,14 @@ def retrieve_chunks(query: str, book: Optional[str] = None, book_id: Optional[st
                             success_count = 0
                             for chunk in ocr_chunks:
                                 try:
-                                    book_db.add_chunk(
+                                    chunk_result = book_db.add_chunk(
                                         book_id=book_id,
                                         chunk_index=chunk['chunk_index'],
                                         title=chunk['title'],
                                         text=chunk['text'],
                                         author=chunk['author']
                                     )
+                                    logger.info(f"Added chunk {chunk['chunk_index']} with result: {chunk_result}")
                                     success_count += 1
                                 except Exception as chunk_error:
                                     logger.error(f"Error adding chunk {chunk['chunk_index']}: {str(chunk_error)}")
@@ -234,7 +243,5 @@ def retrieve_chunks(query: str, book: Optional[str] = None, book_id: Optional[st
                     logger.warning("No full text available for dynamic chunking")
             except Exception as gen_error:
                 logger.error(f"Error generating chunks dynamically: {gen_error}")
-    
-    # ... keep existing code for book title search and general search
     
     return chunks
