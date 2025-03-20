@@ -20,7 +20,7 @@ const INTRO_PROMPTS = [
 const GENERAL_INTRO_PROMPTS = [
   "I'm here to help! What book-related questions can I answer for you today?",
   "Hello! I can chat about books, authors, or literary concepts. What's on your mind?",
-  "I'm your AI book assistant. What would you like to know about literature or specific books?",
+  "I'm your AI reading companion. What would you like to know about literature or specific books?",
   "Welcome! I can discuss books, recommend reads, or explain literary concepts. How can I help?",
   "I'd be happy to chat about any book-related topics. What interests you today?",
 ];
@@ -131,40 +131,6 @@ async function searchBookByTitle(supabase: any, title: string) {
   
   console.log('No book found matching title');
   return null;
-}
-
-// Function to trigger book content extraction via the backend API
-async function triggerBookExtraction(bookId: string, authHeader: string) {
-  console.log(`Triggering book extraction for book ID: ${bookId}`);
-  
-  try {
-    const backendUrl = Deno.env.get('BACKEND_API_URL') || 'http://localhost:8000';
-    const extractionUrl = `${backendUrl}/extract-book/${bookId}`;
-    
-    console.log(`Calling backend extraction API at: ${extractionUrl}`);
-    
-    const response = await fetch(extractionUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': authHeader
-      },
-      body: JSON.stringify({ book_id: bookId })
-    });
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`Backend extraction API returned error: ${response.status} - ${errorText}`);
-      return false;
-    }
-    
-    const result = await response.json();
-    console.log(`Extraction API response:`, result);
-    return true;
-  } catch (error) {
-    console.error(`Error calling backend extraction API:`, error);
-    return false;
-  }
 }
 
 // Simple simulation of an AI response based on chunks
@@ -337,7 +303,6 @@ serve(async (req) => {
     let book = bookTitle;
     let author = null;
     let bookData = null;
-    let extractionTriggered = false;
 
     // If we have bookId but no chunks, fetch them from database
     if (bookId && chunks.length === 0) {
@@ -354,54 +319,13 @@ serve(async (req) => {
         chunks = await fetchBookChunks(supabaseClient, bookId);
         console.log(`Fetched ${chunks.length} chunks for book "${book}" (ID: ${bookId})`);
         
-        // If no chunks found but book exists, trigger extraction
+        // If no chunks found but book exists
         if (chunks.length === 0) {
           console.log(`No chunks found for book ID: ${bookId} despite book existing in database`);
           console.log(`Book status: ${bookData.status}, chunks_count: ${bookData.chunks_count}`);
           
-          // Trigger extraction process
-          if (bookData.status !== 'error' && bookData.status !== 'failed') {
-            console.log(`Triggering extraction process for book ID: ${bookId}`);
-            
-            // Call the backend API to start extraction
-            extractionTriggered = await triggerBookExtraction(bookId, authHeader);
-            
-            if (extractionTriggered) {
-              console.log(`Successfully triggered extraction for book ID: ${bookId}`);
-              
-              // Update book status to processing if needed
-              if (bookData.status !== 'processing') {
-                const { error: updateError } = await supabaseClient
-                  .from('books')
-                  .update({ status: 'processing' })
-                  .eq('id', bookId);
-                  
-                if (updateError) {
-                  console.error(`Error updating book status: ${updateError.message}`);
-                }
-              }
-              
-              // Return a processing message to the user
-              return new Response(
-                JSON.stringify({
-                  response: `I'm now extracting content from "${book}". This may take a minute or two. Please try your question again shortly.`,
-                  book,
-                  author,
-                  bookId,
-                  status: 'processing',
-                  extractionTriggered: true
-                }),
-                {
-                  headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                }
-              );
-            } else {
-              console.error(`Failed to trigger extraction for book ID: ${bookId}`);
-            }
-          }
-          
           // If book status indicates processing, inform the user
-          if (bookData.status === 'processing') {
+          if (bookData.status === 'processing' || bookData.status === 'extracting') {
             return new Response(
               JSON.stringify({
                 response: `Your book "${book}" is still being processed. Please try again in a few moments.`,
