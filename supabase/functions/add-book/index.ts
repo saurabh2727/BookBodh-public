@@ -1,12 +1,14 @@
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.38.4";
 import { v4 as uuidv4 } from "https://esm.sh/uuid@11.0.0";
 
 // This is a helper function to trigger extraction for a newly added book
-async function triggerExtraction(bookId: string) {
+// Modified to pass both the database UUID and external Google Books ID
+async function triggerExtraction(bookId: string, externalId: string) {
   try {
-    console.log(`Triggering extraction for book ${bookId}`);
+    console.log(`Triggering extraction for book ${bookId} (External ID: ${externalId})`);
     
     // Get the backend API URL from environment or use default
     const apiUrl = Deno.env.get("BACKEND_API_URL") || "https://ethical-wisdom-bot.lovable.app";
@@ -17,11 +19,14 @@ async function triggerExtraction(bookId: string) {
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ book_id: bookId }),
+      body: JSON.stringify({ 
+        book_id: bookId,
+        external_id: externalId  // Pass the Google Books ID as well
+      }),
     });
     
     if (response.ok) {
-      console.log(`Extraction initiated successfully for book ${bookId}`);
+      console.log(`Extraction initiated successfully for book ${bookId} (External ID: ${externalId})`);
       return true;
     } else {
       console.error(`Failed to initiate extraction for book ${bookId}: ${await response.text()}`);
@@ -139,8 +144,9 @@ serve(async (req) => {
       console.log(`Book added successfully with ID: ${addedBookId}. Triggering extraction...`);
       
       // Use Edge Runtime waitUntil to run extraction in the background
+      // Now passing both the database UUID and the original Google Books ID
       EdgeRuntime.waitUntil((async () => {
-        const extractionStarted = await triggerExtraction(addedBookId);
+        const extractionStarted = await triggerExtraction(addedBookId, originalBookId);
         
         if (extractionStarted) {
           // Update the book with extraction status

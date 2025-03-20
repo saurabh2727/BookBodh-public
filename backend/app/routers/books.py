@@ -18,7 +18,7 @@ def get_book_db():
 def get_embedding_store(book_db: BookDatabase = Depends(get_book_db)):
     return EmbeddingStore(book_db)
 
-async def trigger_extraction(book_id: str):
+async def trigger_extraction(book_id: str, external_id: str = None):
     """
     Background task to trigger extraction for a newly added book
     """
@@ -27,15 +27,19 @@ async def trigger_extraction(book_id: str):
         api_base_url = os.environ.get("BACKEND_API_URL", "http://localhost:8000")
         extraction_url = f"{api_base_url}/extract-book/{book_id}"
         
+        payload = {"book_id": book_id, "force": False}
+        if external_id:
+            payload["external_id"] = external_id
+            
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 extraction_url, 
-                json={"book_id": book_id, "force": False},
+                json=payload,
                 timeout=60
             )
             
             if response.status_code == 202:
-                print(f"Extraction successfully triggered for book {book_id}")
+                print(f"Extraction successfully triggered for book {book_id} (External ID: {external_id})")
             else:
                 print(f"Failed to trigger extraction for book {book_id}: {response.text}")
     
@@ -59,27 +63,31 @@ async def upload_book_compatibility(background_tasks: BackgroundTasks):
     )
 
 @router.post("/extract-book/{book_id}", status_code=202)
-async def extract_book(book_id: str, background_tasks: BackgroundTasks):
+async def extract_book(book_id: str, background_tasks: BackgroundTasks, external_id: str = None):
     """
     Endpoint to trigger extraction for a newly added book
     """
-    background_tasks.add_task(trigger_extraction, book_id)
+    # Now passing both IDs to the background task
+    background_tasks.add_task(trigger_extraction, book_id, external_id)
     
     return {
         "status": "initiated",
         "book_id": book_id,
+        "external_id": external_id,
         "message": "Book extraction process has been initiated"
     }
 
 @router.post("/books/{book_id}/extract", status_code=202)
-async def trigger_book_extraction(book_id: str, background_tasks: BackgroundTasks):
+async def trigger_book_extraction(book_id: str, background_tasks: BackgroundTasks, external_id: str = None):
     """
     Endpoint to manually trigger extraction for a book
     """
-    background_tasks.add_task(trigger_extraction, book_id)
+    # Now passing both IDs to the background task
+    background_tasks.add_task(trigger_extraction, book_id, external_id)
     
     return {
         "status": "initiated",
         "book_id": book_id,
+        "external_id": external_id,
         "message": "Book extraction process has been initiated"
     }
