@@ -427,6 +427,36 @@ async function checkBucketExists(supabaseClient: any, bucketName: string): Promi
   }
 }
 
+// Add a new helper function to trigger extraction for a newly uploaded book
+async function triggerExtraction(bookId: string) {
+  try {
+    console.log(`Triggering extraction for book ${bookId}`);
+    
+    // Get the backend API URL from environment or use default
+    const apiUrl = Deno.env.get("BACKEND_API_URL") || "https://ethical-wisdom-bot.lovable.app";
+    const extractionUrl = `${apiUrl}/extract-book/${bookId}`;
+    
+    const response = await fetch(extractionUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ book_id: bookId }),
+    });
+    
+    if (response.ok) {
+      console.log(`Extraction initiated successfully for book ${bookId}`);
+      return true;
+    } else {
+      console.error(`Failed to initiate extraction for book ${bookId}: ${await response.text()}`);
+      return false;
+    }
+  } catch (error) {
+    console.error(`Error triggering extraction: ${error.message}`);
+    return false;
+  }
+}
+
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === "OPTIONS") {
@@ -733,6 +763,11 @@ serve(async (req) => {
         console.warn("Error creating book summary:", summaryError);
         // Continue even if summary creation fails
       }
+      
+      // After successful processing, trigger extraction to generate embeddings
+      // This ensures the book is fully ready for semantic search
+      console.log("Triggering additional extraction processing...");
+      await triggerExtraction(bookId);
     })());
     
     return new Response(

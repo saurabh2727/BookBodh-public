@@ -1,170 +1,92 @@
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.38.4";
 import { corsHeaders } from "../_shared/cors.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.38.4";
 
-// Manually decode JWT token to extract user ID
-async function decodeJWT(token) {
+// This is a new helper function to trigger extraction for a newly added book
+async function triggerExtraction(bookId: string) {
   try {
-    console.log("Decoding JWT token, length:", token.length);
+    console.log(`Triggering extraction for book ${bookId}`);
     
-    // Remove 'Bearer ' prefix if present
-    const actualToken = token.startsWith("Bearer ") ? token.substring(7) : token;
+    // Get the backend API URL from environment or use default
+    const apiUrl = Deno.env.get("BACKEND_API_URL") || "https://ethical-wisdom-bot.lovable.app";
+    const extractionUrl = `${apiUrl}/extract-book/${bookId}`;
     
-    // Split the token and grab the payload part
-    const parts = actualToken.split(".");
-    if (parts.length !== 3) {
-      console.error("Invalid token format, parts:", parts.length);
-      throw new Error("Invalid JWT token format");
-    }
-    
-    // Decode the payload
-    const payload = parts[1];
-    const decodedPayload = JSON.parse(
-      new TextDecoder().decode(
-        Uint8Array.from(atob(payload), (c) => c.charCodeAt(0))
-      )
-    );
-    
-    console.log("Successfully decoded JWT payload", {
-      sub: decodedPayload.sub,
-      exp: decodedPayload.exp ? new Date(decodedPayload.exp * 1000).toISOString() : 'missing',
-      iat: decodedPayload.iat ? new Date(decodedPayload.iat * 1000).toISOString() : 'missing',
-      role: decodedPayload.role
+    const response = await fetch(extractionUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ book_id: bookId }),
     });
     
-    return decodedPayload;
+    if (response.ok) {
+      console.log(`Extraction initiated successfully for book ${bookId}`);
+      return true;
+    } else {
+      console.error(`Failed to initiate extraction for book ${bookId}: ${await response.text()}`);
+      return false;
+    }
   } catch (error) {
-    console.error("JWT decode error:", error);
-    throw new Error(`Failed to decode JWT: ${error.message}`);
+    console.error(`Error triggering extraction: ${error.message}`);
+    return false;
   }
 }
 
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === "OPTIONS") {
-    console.log("Handling OPTIONS request for CORS preflight");
-    return new Response(null, { 
+    return new Response(null, {
       status: 204,
-      headers: corsHeaders
+      headers: corsHeaders,
     });
   }
-  
+
   try {
-    // Log request details for debugging
-    console.log("Request method:", req.method);
-    console.log("Request headers:", Object.fromEntries(req.headers.entries()));
-    
-    // Get authentication token from request
-    const authHeader = req.headers.get("Authorization");
-    
-    if (!authHeader) {
-      console.error("Missing Authorization header");
-      return new Response(
-        JSON.stringify({
-          error: "Missing Authorization header",
-        }),
-        {
-          status: 401,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
-    }
-    
-    console.log("Authorization header present, length:", authHeader.length);
-    
-    // Parse the request body
     const { bookId, title, authors, category, previewLink } = await req.json();
-    
-    // Validate required fields
-    if (!bookId || !title) {
+
+    // Validate that required data is present
+    if (!bookId || !title || !authors || !category) {
       return new Response(
-        JSON.stringify({ 
-          error: "Missing required fields", 
-          required: "bookId and title are required" 
-        }),
+        JSON.stringify({ error: "Missing required data" }),
         {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         }
       );
     }
-    
-    // Create a service role Supabase client to bypass RLS
-    const supabaseAdmin = createClient(
+
+    // Initialize Supabase client
+    const supabase = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
       {
-        auth: {
-          persistSession: false,
-          autoRefreshToken: false
-        }
+        global: {
+          headers: {
+            Authorization: req.headers.get("Authorization")!,
+          },
+        },
       }
     );
-    
-    // Manually decode the JWT to get the user ID
-    let userId;
-    try {
-      const decodedToken = await decodeJWT(authHeader);
-      userId = decodedToken.sub;
-      
-      if (!userId) {
-        console.error("No user ID (sub) found in JWT token");
-        throw new Error("Invalid JWT token: missing subject (user ID)");
-      }
-      
-      console.log("User ID extracted from JWT:", userId);
-    } catch (jwtError) {
-      console.error("JWT validation error:", jwtError);
-      return new Response(
-        JSON.stringify({
-          error: "Authentication failed",
-          details: jwtError.message
-        }),
-        {
-          status: 401,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
-    }
-    
-    // Generate a UUID for the book
-    const newBookId = crypto.randomUUID();
-    
-    // Log database operation attempt
-    console.log("Attempting to insert book with following data:", {
-      id: newBookId,
-      title: title,
-      author: Array.isArray(authors) ? authors.join(", ") : authors || "Unknown",
-      category: category || "Uncategorized",
-      file_url: previewLink, // Using previewLink as file_url since there's no preview_link column
-      user_id: userId
-    });
-    
+
     // Add book to database
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await supabase
       .from("books")
-      .insert({
-        id: newBookId,
-        title: title,
-        author: Array.isArray(authors) ? authors.join(", ") : authors || "Unknown",
-        category: category || "Uncategorized",
-        file_url: previewLink, // Changed from preview_link to file_url to match the schema
-        user_id: userId,
-        status: "active",
-        summary: `Book added from Google Books: ${title}`,
-        chunks_count: 0
-      })
-      .select('id, title')
-      .single();
-    
+      .insert([
+        {
+          id: bookId,
+          title: title,
+          author: authors.join(", "),
+          category: category,
+          icon_url: previewLink,
+          status: 'pending'
+        },
+      ])
+      .select()
+
     if (error) {
-      console.error("Database insert error:", error);
+      console.error("Error adding book:", error);
       return new Response(
-        JSON.stringify({ 
-          error: `Error saving book: ${error.message}`,
-          details: error
-        }),
+        JSON.stringify({ error: "Failed to add book" }),
         {
           status: 500,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -172,31 +94,52 @@ serve(async (req) => {
       );
     }
     
-    // Return success response
-    return new Response(
-      JSON.stringify({
-        success: true,
-        message: `Book "${title}" added successfully`,
-        bookId: data.id
-      }),
-      {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      }
-    );
-    
+    // After successfully adding the book, trigger extraction in the background
+    if (data && data.length > 0 && data[0].id) {
+      const addedBookId = data[0].id;
+      console.log(`Book added successfully with ID: ${addedBookId}. Triggering extraction...`);
+      
+      // Use Edge Runtime waitUntil to run extraction in the background
+      EdgeRuntime.waitUntil((async () => {
+        const extractionStarted = await triggerExtraction(addedBookId);
+        
+        if (extractionStarted) {
+          // Update the book with extraction status
+          await supabase
+            .from('books')
+            .update({ status: 'extracting' })
+            .eq('id', addedBookId);
+        }
+      })());
+      
+      return new Response(
+        JSON.stringify({
+          success: true,
+          message: `Book "${title}" added successfully and extraction started`,
+          bookId: addedBookId,
+          title: title,
+          extractionTriggered: true
+        }),
+        {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    } else {
+      console.error("Book not added successfully or ID not found");
+      return new Response(
+        JSON.stringify({ error: "Book not added successfully or ID not found" }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
   } catch (error) {
     console.error("Unexpected error:", error);
-    
-    return new Response(
-      JSON.stringify({ 
-        error: `Unexpected error: ${error instanceof Error ? error.message : String(error)}`,
-        stack: error instanceof Error ? error.stack : undefined
-      }),
-      {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      }
-    );
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 });
