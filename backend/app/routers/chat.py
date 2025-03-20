@@ -4,12 +4,54 @@ from fastapi import APIRouter, HTTPException
 from app.models.chat import ChatRequest, ChatResponse
 from app.services.retrieval import retrieve_chunks
 from app.services.llm import generate_response
+from pydantic import BaseModel
+from typing import Optional
 
 # Set up logging for this module
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 router = APIRouter(tags=["chat"])
+
+class ExtractionRequest(BaseModel):
+    book_id: str
+    force: Optional[bool] = False
+
+@router.post("/extract-book/{book_id}", status_code=202)
+async def extract_book(book_id: str, request: ExtractionRequest):
+    """
+    Trigger book content extraction for a specific book
+    
+    Args:
+        book_id: ID of the book to extract content from
+        request: Optional parameters for the extraction
+        
+    Returns:
+        Dictionary with status information
+    """
+    logger.info(f"Book extraction endpoint called for book ID: {book_id}")
+    
+    try:
+        # Use retrieve_chunks to trigger the extraction process
+        # By passing only the book_id, it will focus on getting chunks for that book
+        # If no chunks exist, it will trigger the extraction flow
+        chunks = retrieve_chunks("", None, book_id)
+        
+        extraction_status = "success" if chunks and len(chunks) > 0 else "in_progress"
+        chunks_count = len(chunks) if chunks else 0
+        
+        logger.info(f"Extraction triggered with status: {extraction_status}, chunks: {chunks_count}")
+        
+        return {
+            "status": extraction_status,
+            "book_id": book_id,
+            "chunks_count": chunks_count,
+            "message": f"Book content extraction {'completed' if chunks_count > 0 else 'initiated'}"
+        }
+            
+    except Exception as e:
+        logger.error(f"Error processing extraction request: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error processing extraction request: {str(e)}")
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
