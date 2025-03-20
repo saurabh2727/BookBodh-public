@@ -7,6 +7,7 @@ from typing import Dict, Any, List
 from .routers import books, chat
 from .config.settings import Settings
 from pathlib import Path
+from .services.book_extraction import BookExtractor
 
 # Configure logger
 logging.basicConfig(level=logging.INFO)
@@ -31,6 +32,17 @@ app.add_middleware(
 # Include routers
 app.include_router(books.router)
 app.include_router(chat.router)
+
+# Define paths
+app_dir = os.path.dirname(__file__)
+cache_dir = os.path.join(app_dir, "cache")
+screenshots_dir = os.path.join(cache_dir, "screenshots")
+uploads_dir = os.path.join(os.path.dirname(app_dir), "uploads")
+
+# Create directories if they don't exist
+os.makedirs(cache_dir, exist_ok=True)
+os.makedirs(screenshots_dir, exist_ok=True)
+os.makedirs(uploads_dir, exist_ok=True)
 
 @app.get("/")
 async def root():
@@ -131,6 +143,61 @@ async def health_check():
         return {
             "status": "unhealthy",
             "message": f"Health check failed: {str(e)}"
+        }
+
+@app.get("/api-routes")
+async def list_api_routes():
+    """List all available API routes for debugging"""
+    routes = []
+    for route in app.routes:
+        routes.append({
+            "path": route.path,
+            "name": route.name,
+            "methods": route.methods if hasattr(route, "methods") else None,
+        })
+    
+    # Add chat router info
+    chat_router_info = {
+        "prefix": chat.router.prefix,
+        "tags": chat.router.tags,
+        "routes": [
+            {"path": r.path, "name": r.name, "methods": r.methods} 
+            for r in chat.router.routes
+        ]
+    }
+    
+    return {
+        "app_routes": routes,
+        "chat_router_info": chat_router_info
+    }
+
+@app.get("/test-chat")
+async def test_chat_endpoint():
+    """Test if the chat endpoint is properly registered"""
+    logger.info("Testing chat endpoint registration")
+    try:
+        # Check if the chat router is properly included
+        is_chat_router_included = False
+        for route in app.routes:
+            if '/chat' in route.path and 'POST' in route.methods:
+                is_chat_router_included = True
+                break
+        
+        return {
+            "status": "ok",
+            "message": "Chat endpoint test",
+            "is_chat_router_included": is_chat_router_included,
+            "chat_router_tags": chat.router.tags,
+            "chat_router_routes": [
+                {"path": r.path, "name": r.name, "methods": r.methods} 
+                for r in chat.router.routes
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Error testing chat endpoint: {str(e)}")
+        return {
+            "status": "error",
+            "message": f"Error testing chat endpoint: {str(e)}"
         }
 
 @app.get("/diagnostic/selenium")

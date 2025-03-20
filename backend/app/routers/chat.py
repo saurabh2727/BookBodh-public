@@ -1,8 +1,13 @@
 
+import logging
 from fastapi import APIRouter, HTTPException
 from app.models.chat import ChatRequest, ChatResponse
 from app.services.retrieval import retrieve_chunks
 from app.services.llm import generate_response
+
+# Set up logging for this module
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 router = APIRouter(tags=["chat"])
 
@@ -17,9 +22,12 @@ async def chat(request: ChatRequest):
     Returns:
         ChatResponse with AI-generated answer and citation information
     """
+    logger.info(f"Chat endpoint called with query: '{request.query}' for book: {request.book or request.bookId or 'None'}")
+    
     try:
         # For general chat without a book selected
         if not request.book and not request.bookId and not request.chunks:
+            logger.info("Processing general chat without book context")
             return ChatResponse(
                 response=f"I'm BookBodh, your AI assistant. {request.query}",
                 book=None,
@@ -28,15 +36,21 @@ async def chat(request: ChatRequest):
             
         # If a book is specified, use book-specific logic
         if request.book or request.bookId or request.chunks:
+            logger.info(f"Processing book-specific chat. Book: {request.book}, Book ID: {request.bookId}, Chunks provided: {bool(request.chunks)}")
+            
             # Use provided chunks if available, otherwise retrieve them
             if request.chunks:
+                logger.info(f"Using {len(request.chunks)} provided chunks")
                 chunks = request.chunks
             else:
                 # Retrieve relevant chunks based on query and optional book filter
+                logger.info(f"Retrieving chunks for query: '{request.query}'")
                 chunks = retrieve_chunks(request.query, request.book, request.bookId)
+                logger.info(f"Retrieved {len(chunks) if chunks else 0} chunks")
             
             if not chunks:
                 # If no relevant chunks found, return a helpful message
+                logger.info("No relevant chunks found for the query")
                 return ChatResponse(
                     response="I couldn't find any relevant information in this book. Please try a different question or book selection.",
                     book=None,
@@ -44,7 +58,9 @@ async def chat(request: ChatRequest):
                 )
             
             # Generate response using LLM
+            logger.info(f"Generating response using LLM with {len(chunks)} chunks")
             llm_response = generate_response(request.query, chunks)
+            logger.info(f"LLM response generated with {len(llm_response['response']) if llm_response.get('response') else 0} characters")
             
             # Return formatted response
             return ChatResponse(
@@ -54,4 +70,5 @@ async def chat(request: ChatRequest):
             )
         
     except Exception as e:
+        logger.error(f"Error processing chat request: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error processing chat request: {str(e)}")
