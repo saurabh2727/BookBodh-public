@@ -64,15 +64,45 @@ serve(async (req) => {
     // Initialize Supabase client
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
-      {
-        global: {
-          headers: {
-            Authorization: req.headers.get("Authorization")!,
-          },
-        },
-      }
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
     );
+    
+    // Get the user ID from the authorization header
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) {
+      console.error("No authorization header provided");
+      return new Response(
+        JSON.stringify({ error: "No authorization header provided" }),
+        {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+    
+    // Extract the JWT token
+    const token = authHeader.replace("Bearer ", "");
+    console.log("Token received, checking user identity...");
+    
+    // Get the user ID from the JWT token
+    const { data: userData, error: userError } = await supabase.auth.getUser(token);
+    
+    if (userError || !userData?.user) {
+      console.error("Error getting user from token:", userError);
+      return new Response(
+        JSON.stringify({ error: `Authentication failed: ${userError?.message || "Invalid token"}` }),
+        {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+    
+    const userId = userData.user.id;
+    console.log(`User authenticated, id: ${userId}`);
+    
+    // Create a fake file URL since we don't have an actual file
+    const fileUrl = `https://books.google.com/books?id=${originalBookId}`;
 
     // Add book to database using the generated UUID
     const { data, error } = await supabase
@@ -84,8 +114,10 @@ serve(async (req) => {
           author: authors.join(", "),
           category: category,
           icon_url: previewLink,
+          file_url: fileUrl, // Using the Google Books URL as the file URL
           status: 'pending',
-          external_id: originalBookId // Store the original Google Books ID
+          external_id: originalBookId, // Store the original Google Books ID
+          user_id: userId // Make sure to include the user ID
         },
       ])
       .select();
@@ -93,7 +125,7 @@ serve(async (req) => {
     if (error) {
       console.error("Error adding book:", error);
       return new Response(
-        JSON.stringify({ error: `Failed to add book: ${error}` }),
+        JSON.stringify({ error: `Failed to add book: ${error.message}` }),
         {
           status: 500,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
