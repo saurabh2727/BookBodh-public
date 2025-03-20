@@ -53,6 +53,7 @@ export type Database = {
           category: string
           chunks_count: number | null
           created_at: string
+          external_id: string | null
           file_url: string
           icon_url: string | null
           id: string
@@ -66,6 +67,7 @@ export type Database = {
           category: string
           chunks_count?: number | null
           created_at?: string
+          external_id?: string | null
           file_url: string
           icon_url?: string | null
           id?: string
@@ -79,6 +81,7 @@ export type Database = {
           category?: string
           chunks_count?: number | null
           created_at?: string
+          external_id?: string | null
           file_url?: string
           icon_url?: string | null
           id?: string

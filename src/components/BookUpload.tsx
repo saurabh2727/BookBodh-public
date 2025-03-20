@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -192,11 +193,11 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
         
         toast({
           title: "Book added successfully",
-          description: `"${selectedBook.volumeInfo.title}" has been added to your library.`,
+          description: `"${selectedBook.volumeInfo.title}" has been added to your library and extraction has been triggered.`,
           variant: "default",
         });
         
-        onUploadComplete(true, `Book "${selectedBook.volumeInfo.title}" added successfully`, data.bookId);
+        onUploadComplete(true, `Book "${selectedBook.volumeInfo.title}" added successfully${data.extractionTriggered ? ' and extraction started' : ''}`, data.bookId);
       } else {
         throw new Error(data.message || 'Failed to add book');
       }
@@ -366,4 +367,3 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
 };
 
 export default BookUpload;
-

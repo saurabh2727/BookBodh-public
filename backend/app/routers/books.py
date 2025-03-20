@@ -58,6 +58,19 @@ async def upload_book_compatibility(background_tasks: BackgroundTasks):
         }
     )
 
+@router.post("/extract-book/{book_id}", status_code=202)
+async def extract_book(book_id: str, background_tasks: BackgroundTasks):
+    """
+    Endpoint to trigger extraction for a newly added book
+    """
+    background_tasks.add_task(trigger_extraction, book_id)
+    
+    return {
+        "status": "initiated",
+        "book_id": book_id,
+        "message": "Book extraction process has been initiated"
+    }
+
 @router.post("/books/{book_id}/extract", status_code=202)
 async def trigger_book_extraction(book_id: str, background_tasks: BackgroundTasks):
     """
