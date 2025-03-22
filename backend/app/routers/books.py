@@ -1,11 +1,12 @@
 
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
 from typing import List, Dict, Optional
 import os
 import uuid
 import httpx
 import logging
+import traceback
 
 from app.config.settings import settings
 from app.database.books import BookDatabase
@@ -146,6 +147,7 @@ async def upload_book_compatibility(background_tasks: BackgroundTasks):
 
 @router.post("/extract-book/{book_id}", status_code=202)
 async def extract_book(
+    request: Request,
     book_id: str, 
     background_tasks: BackgroundTasks, 
     external_id: Optional[str] = None,
@@ -154,35 +156,117 @@ async def extract_book(
     """
     Endpoint to trigger extraction for a newly added book
     """
-    logger.info(f"Extract book endpoint called for book_id={book_id}, external_id={external_id}, force={force}")
-    
-    # If force is False, check if the book already has chunks
-    if not force:
-        book_db = BookDatabase()
-        book = book_db.get_book(book_id)
-        chunks = book_db.get_chunks_by_book_id(book_id)
+    try:
+        logger.info(f"Extract book endpoint called for book_id={book_id}, external_id={external_id}, force={force}")
         
-        if book and book.get('status') == 'processed' and chunks and len(chunks) > 0:
-            logger.info(f"Book {book_id} already has {len(chunks)} chunks and is marked as processed")
-            return {
-                "status": "already_processed",
+        # Log the request headers and body for debugging
+        logger.info(f"Request headers: {dict(request.headers)}")
+        
+        try:
+            body = await request.json()
+            logger.info(f"Request body: {body}")
+            # If external_id wasn't provided as a query param, try to get it from the body
+            if not external_id and 'external_id' in body:
+                external_id = body['external_id']
+                logger.info(f"Using external_id from request body: {external_id}")
+        except Exception as e:
+            logger.warning(f"Could not parse request body as JSON: {e}")
+        
+        # Safe accessor for BookDatabase
+        try:
+            book_db = BookDatabase()
+        except Exception as db_error:
+            logger.error(f"Error initializing BookDatabase: {str(db_error)}", exc_info=True)
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "status": "error",
+                    "book_id": book_id,
+                    "message": f"Database connection error: {str(db_error)}"
+                }
+            )
+        
+        # If force is False, check if the book already has chunks
+        if not force:
+            try:
+                book = book_db.get_book(book_id)
+                if not book:
+                    logger.warning(f"Book {book_id} not found in database")
+                    return JSONResponse(
+                        status_code=404,
+                        content={
+                            "status": "error",
+                            "book_id": book_id,
+                            "message": f"Book with ID {book_id} not found"
+                        }
+                    )
+                
+                logger.info(f"Book details: {book}")
+                
+                chunks = book_db.get_chunks_by_book_id(book_id)
+                
+                if book and book.get('status') == 'processed' and chunks and len(chunks) > 0:
+                    logger.info(f"Book {book_id} already has {len(chunks)} chunks and is marked as processed")
+                    return JSONResponse(
+                        status_code=200,
+                        content={
+                            "status": "already_processed",
+                            "book_id": book_id,
+                            "chunks_count": len(chunks),
+                            "message": "Book already has extracted content. Use force=true to re-extract."
+                        }
+                    )
+            except Exception as check_error:
+                logger.error(f"Error checking book status: {str(check_error)}", exc_info=True)
+                return JSONResponse(
+                    status_code=500,
+                    content={
+                        "status": "error",
+                        "book_id": book_id,
+                        "message": f"Error checking book status: {str(check_error)}"
+                    }
+                )
+        
+        # Now passing both IDs to the background task
+        try:
+            background_tasks.add_task(trigger_extraction, book_id, external_id)
+            logger.info(f"Extraction task added to background tasks for book_id={book_id}, external_id={external_id}")
+        except Exception as task_error:
+            logger.error(f"Error adding background task: {str(task_error)}", exc_info=True)
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "status": "error",
+                    "book_id": book_id,
+                    "message": f"Error queuing extraction task: {str(task_error)}"
+                }
+            )
+        
+        return JSONResponse(
+            status_code=202,
+            content={
+                "status": "initiated",
                 "book_id": book_id,
-                "chunks_count": len(chunks),
-                "message": "Book already has extracted content. Use force=true to re-extract."
+                "external_id": external_id,
+                "message": "Book extraction process has been initiated"
             }
-    
-    # Now passing both IDs to the background task
-    background_tasks.add_task(trigger_extraction, book_id, external_id)
-    
-    return {
-        "status": "initiated",
-        "book_id": book_id,
-        "external_id": external_id,
-        "message": "Book extraction process has been initiated"
-    }
+        )
+    except Exception as e:
+        logger.error(f"Unhandled exception in extract_book: {str(e)}", exc_info=True)
+        # Return JSON instead of letting FastAPI generate an HTML error
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "book_id": book_id,
+                "message": f"Server error: {str(e)}",
+                "traceback": traceback.format_exc()
+            }
+        )
 
 @router.post("/books/{book_id}/extract", status_code=202)
 async def trigger_book_extraction(
+    request: Request,
     book_id: str, 
     background_tasks: BackgroundTasks, 
     external_id: Optional[str] = None,
@@ -191,13 +275,54 @@ async def trigger_book_extraction(
     """
     Endpoint to manually trigger extraction for a book
     """
-    # Now passing both IDs to the background task
-    logger.info(f"Manual extraction triggered for book_id={book_id}, external_id={external_id}, force={force}")
-    background_tasks.add_task(trigger_extraction, book_id, external_id)
-    
-    return {
-        "status": "initiated",
-        "book_id": book_id,
-        "external_id": external_id,
-        "message": "Book extraction process has been initiated"
-    }
+    try:
+        logger.info(f"Manual extraction triggered for book_id={book_id}, external_id={external_id}, force={force}")
+        
+        # Log the request headers and body for debugging
+        logger.info(f"Request headers: {dict(request.headers)}")
+        
+        try:
+            body = await request.json()
+            logger.info(f"Request body: {body}")
+            # If external_id wasn't provided as a query param, try to get it from the body
+            if not external_id and 'external_id' in body:
+                external_id = body['external_id']
+                logger.info(f"Using external_id from request body: {external_id}")
+        except Exception as e:
+            logger.warning(f"Could not parse request body as JSON: {e}")
+        
+        try:
+            background_tasks.add_task(trigger_extraction, book_id, external_id)
+            logger.info(f"Extraction task added to background tasks for book_id={book_id}, external_id={external_id}")
+        except Exception as task_error:
+            logger.error(f"Error adding background task: {str(task_error)}", exc_info=True)
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "status": "error",
+                    "book_id": book_id,
+                    "message": f"Error queuing extraction task: {str(task_error)}"
+                }
+            )
+            
+        return JSONResponse(
+            status_code=202,
+            content={
+                "status": "initiated",
+                "book_id": book_id,
+                "external_id": external_id,
+                "message": "Book extraction process has been initiated"
+            }
+        )
+    except Exception as e:
+        logger.error(f"Unhandled exception in trigger_book_extraction: {str(e)}", exc_info=True)
+        # Return JSON instead of letting FastAPI generate an HTML error
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "book_id": book_id,
+                "message": f"Server error: {str(e)}",
+                "traceback": traceback.format_exc()
+            }
+        )

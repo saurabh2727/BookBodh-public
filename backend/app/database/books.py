@@ -1,8 +1,13 @@
+
 from typing import Dict, List, Optional
 import re
 import uuid
 import os
 import json
+import logging
+
+# Configure logger
+logger = logging.getLogger(__name__)
 
 class BookDatabase:
     def __init__(self):
@@ -85,7 +90,7 @@ Aurelius consistently returns to the importance of accepting what cannot be chan
         try:
             cache_file = os.path.join(os.path.dirname(__file__), "books_cache.json")
             if os.path.exists(cache_file):
-                print(f"Loading books cache from {cache_file}")
+                logger.info(f"Loading books cache from {cache_file}")
                 with open(cache_file, 'r') as f:
                     external_data = json.load(f)
                     
@@ -98,7 +103,7 @@ Aurelius consistently returns to the importance of accepting what cannot be chan
                                     "author": book_data.get("author", "Unknown"),
                                     "content": book_data.get("content", "")
                                 }
-                                print(f"Loaded book: {book_data['title']} with ID {book_id}")
+                                logger.info(f"Loaded book: {book_data['title']} with ID {book_id}")
                     
                     # Add chunks to the in-memory database
                     if "chunks" in external_data:
@@ -108,11 +113,12 @@ Aurelius consistently returns to the importance of accepting what cannot be chan
                                 continue
                             
                             self.chunks.append(chunk)
-                            print(f"Loaded chunk #{chunk.get('id')} for book ID {chunk.get('book_id')}")
+                            logger.info(f"Loaded chunk #{chunk.get('id')} for book ID {chunk.get('book_id')}")
                 
-                print(f"Loaded {len(self.books)} books and {len(self.chunks)} chunks from external data")
+                logger.info(f"Loaded {len(self.books)} books and {len(self.chunks)} chunks from external data")
         except Exception as e:
-            print(f"Error loading external books: {e}")
+            logger.error(f"Error loading external books: {e}", exc_info=True)
+            # Continue with empty data rather than failing completely
     
     def _process_books(self, chunk_size: int = 300):
         """
@@ -220,26 +226,30 @@ Aurelius consistently returns to the importance of accepting what cannot be chan
         Returns:
             Chunk ID
         """
-        # Generate chunk ID
-        chunk_id = len(self.chunks)
-        
-        # Create the chunk
-        chunk = {
-            "id": chunk_id,
-            "book_id": book_id,
-            "title": title,
-            "author": author,
-            "text": text,
-            "chunk_index": chunk_index
-        }
-        
-        # Add to chunks list
-        self.chunks.append(chunk)
-        
-        # Try to save to cache
-        self._save_external_books()
-        
-        return chunk_id
+        try:
+            # Generate chunk ID
+            chunk_id = len(self.chunks)
+            
+            # Create the chunk
+            chunk = {
+                "id": chunk_id,
+                "book_id": book_id,
+                "title": title,
+                "author": author,
+                "text": text,
+                "chunk_index": chunk_index
+            }
+            
+            # Add to chunks list
+            self.chunks.append(chunk)
+            
+            # Try to save to cache
+            self._save_external_books()
+            
+            return chunk_id
+        except Exception as e:
+            logger.error(f"Error adding chunk: {e}", exc_info=True)
+            raise
     
     def _save_external_books(self):
         """Save current books and chunks to a cache file for persistence"""
@@ -259,69 +269,165 @@ Aurelius consistently returns to the importance of accepting what cannot be chan
             with open(cache_file, 'w') as f:
                 json.dump(data, f, indent=2)
                 
-            print(f"Saved {len(self.books)} books and {len(self.chunks)} chunks to cache")
+            logger.info(f"Saved {len(self.books)} books and {len(self.chunks)} chunks to cache")
         except Exception as e:
-            print(f"Error saving books to cache: {e}")
+            logger.error(f"Error saving books to cache: {e}", exc_info=True)
+            # Continue rather than failing completely
     
     def get_all_chunks(self) -> List[Dict]:
         """Return all text chunks with metadata"""
-        return self.chunks
+        try:
+            return self.chunks
+        except Exception as e:
+            logger.error(f"Error getting all chunks: {e}", exc_info=True)
+            return []
     
     def get_chunk(self, chunk_id: int) -> Optional[Dict]:
         """Get a specific chunk by ID"""
-        for chunk in self.chunks:
-            if chunk["id"] == chunk_id:
-                return chunk
-        return None
+        try:
+            for chunk in self.chunks:
+                if chunk["id"] == chunk_id:
+                    return chunk
+            return None
+        except Exception as e:
+            logger.error(f"Error getting chunk {chunk_id}: {e}", exc_info=True)
+            return None
     
     def get_chunks_by_book(self, book_title: str) -> List[Dict]:
         """Get all chunks for a specific book title"""
-        return [chunk for chunk in self.chunks if chunk["title"] == book_title]
+        try:
+            return [chunk for chunk in self.chunks if chunk["title"] == book_title]
+        except Exception as e:
+            logger.error(f"Error getting chunks for book title {book_title}: {e}", exc_info=True)
+            return []
     
     def get_chunks_by_book_id(self, book_id: str) -> List[Dict]:
         """Get all chunks for a specific book ID"""
-        # Print debug information
-        print(f"Looking for chunks with book_id: {book_id}")
-        
-        # Find chunks with this book_id
-        chunks = [chunk for chunk in self.chunks if chunk.get("book_id") == book_id]
-        
-        # If no chunks found, try to fetch from Supabase
-        if not chunks:
-            print(f"No chunks found in memory for book_id: {book_id}")
-            # Reload external books in case new data is available
-            self._load_external_books()
+        try:
+            # Print debug information
+            logger.info(f"Looking for chunks with book_id: {book_id}")
             
-            # Try again after reloading
+            # Find chunks with this book_id
             chunks = [chunk for chunk in self.chunks if chunk.get("book_id") == book_id]
             
+            # If no chunks found, try to fetch from Supabase
             if not chunks:
-                print(f"Still no chunks found for book_id {book_id} after reload")
-            else:
-                print(f"Found {len(chunks)} chunks after reloading external books")
-        
-        # Print debug information about the chunks found
-        print(f"Found {len(chunks)} chunks for book_id {book_id}")
-        if chunks:
-            print(f"First chunk title: {chunks[0].get('title')}, length: {len(chunks[0].get('text', ''))}")
-        
-        return chunks
+                logger.info(f"No chunks found in memory for book_id: {book_id}")
+                # Reload external books in case new data is available
+                self._load_external_books(force_reload=True)
+                
+                # Try again after reloading
+                chunks = [chunk for chunk in self.chunks if chunk.get("book_id") == book_id]
+                
+                if not chunks:
+                    logger.info(f"Still no chunks found for book_id {book_id} after reload")
+                else:
+                    logger.info(f"Found {len(chunks)} chunks after reloading external books")
+            
+            # Print debug information about the chunks found
+            logger.info(f"Found {len(chunks)} chunks for book_id {book_id}")
+            if chunks:
+                logger.info(f"First chunk title: {chunks[0].get('title')}, length: {len(chunks[0].get('text', ''))}")
+            
+            return chunks
+        except Exception as e:
+            logger.error(f"Error getting chunks for book_id {book_id}: {e}", exc_info=True)
+            return []
     
     def get_book(self, book_id: str) -> Optional[Dict]:
         """Get book data by ID"""
-        for title, data in self.books.items():
-            if data.get("id") == book_id:
-                return {
-                    "id": book_id,
-                    "title": title,
-                    "author": data["author"],
-                    "content": data.get("content", ""),
-                    "text": data.get("content", "")  # Alias for content
-                }
-        return None
+        try:
+            logger.info(f"Getting book with ID: {book_id}")
+            
+            for title, data in self.books.items():
+                if data.get("id") == book_id:
+                    book_data = {
+                        "id": book_id,
+                        "title": title,
+                        "author": data["author"],
+                        "content": data.get("content", ""),
+                        "text": data.get("content", ""),  # Alias for content
+                        "external_id": data.get("external_id"),
+                        "status": data.get("status")
+                    }
+                    logger.info(f"Found book: {title} (Author: {data['author']})")
+                    return book_data
+            
+            logger.warning(f"Book with ID {book_id} not found in database")
+            return None
+        except Exception as e:
+            logger.error(f"Error getting book {book_id}: {e}", exc_info=True)
+            return None
     
     def get_books(self) -> List[Dict]:
         """Get list of all books with metadata"""
-        return [{"title": title, "author": data["author"], "id": data.get("id", str(uuid.uuid4()))} 
-                for title, data in self.books.items()]
-
+        try:
+            books = [{"title": title, "author": data["author"], "id": data.get("id", str(uuid.uuid4()))} 
+                    for title, data in self.books.items()]
+            logger.info(f"Getting all books: found {len(books)} books")
+            return books
+        except Exception as e:
+            logger.error(f"Error getting all books: {e}", exc_info=True)
+            return []
+            
+    def update_book_status(self, book_id: str, status: str, summary: str = None) -> bool:
+        """
+        Update the status of a book
+        
+        Args:
+            book_id: ID of the book to update
+            status: New status value ('processing', 'processed', 'error', etc.)
+            summary: Optional summary message (e.g., error details)
+            
+        Returns:
+            Success flag
+        """
+        try:
+            logger.info(f"Updating book {book_id} status to: {status}")
+            
+            for title, data in self.books.items():
+                if data.get("id") == book_id:
+                    data["status"] = status
+                    if summary:
+                        data["summary"] = summary
+                    logger.info(f"Updated book {title} status to {status}")
+                    # Save changes to cache
+                    self._save_external_books()
+                    return True
+            
+            logger.warning(f"Failed to update status - book {book_id} not found")
+            return False
+        except Exception as e:
+            logger.error(f"Error updating book status: {e}", exc_info=True)
+            return False
+            
+    def update_book(self, book_id: str, **kwargs) -> bool:
+        """
+        Update book properties
+        
+        Args:
+            book_id: ID of the book to update
+            **kwargs: Key-value pairs of properties to update
+            
+        Returns:
+            Success flag
+        """
+        try:
+            logger.info(f"Updating book {book_id} with: {kwargs}")
+            
+            for title, data in self.books.items():
+                if data.get("id") == book_id:
+                    # Update the book data
+                    for key, value in kwargs.items():
+                        data[key] = value
+                    
+                    logger.info(f"Updated book {title} with new values")
+                    # Save changes to cache
+                    self._save_external_books()
+                    return True
+            
+            logger.warning(f"Failed to update book - book {book_id} not found")
+            return False
+        except Exception as e:
+            logger.error(f"Error updating book: {e}", exc_info=True)
+            return False
