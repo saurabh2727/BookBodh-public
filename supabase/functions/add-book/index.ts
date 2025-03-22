@@ -15,7 +15,10 @@ async function triggerExtraction(bookId: string, externalId: string) {
     
     // Add trailing slash if needed
     const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
-    const extractionUrl = `${baseUrl}/extract-book/${bookId}`;
+    
+    // IMPORTANT: Make sure we're hitting the API endpoint, not the frontend route
+    // Use /api prefix to ensure we're hitting the backend API
+    const extractionUrl = `${baseUrl}/api/extract-book/${bookId}`;
     
     console.log(`Calling extraction API at: ${extractionUrl}`);
     console.log(`Payload: { book_id: ${bookId}, external_id: ${externalId} }`);
@@ -49,12 +52,14 @@ async function triggerExtraction(bookId: string, externalId: string) {
       // Check if this is likely an HTML error page
       if (textResponse.includes('<!DOCTYPE') || textResponse.includes('<html>')) {
         console.error('Received HTML response instead of JSON. The backend endpoint might be returning an error page.');
+        console.error('This suggests we are hitting the frontend instead of the API - need to use the correct API URL');
       }
       
       return false;
     }
   } catch (error) {
     console.error(`Error triggering extraction: ${error.message}`);
+    console.error(`Stack trace: ${error.stack}`);
     return false;
   }
 }

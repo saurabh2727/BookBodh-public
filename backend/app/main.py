@@ -8,6 +8,7 @@ from .routers import books, chat
 from .config.settings import Settings
 from pathlib import Path
 from .services.book_extraction import BookExtractor
+from .database.books import BookDatabase
 
 # Configure logger
 logging.basicConfig(level=logging.INFO)
@@ -30,6 +31,11 @@ app.add_middleware(
 )
 
 # Include routers
+# Mount API routes under /api prefix to avoid conflicts with frontend routing
+app.include_router(books.router, prefix="/api")
+app.include_router(chat.router, prefix="/api")
+
+# Also include routers at root level for backward compatibility
 app.include_router(books.router)
 app.include_router(chat.router)
 
@@ -143,6 +149,26 @@ async def health_check():
         return {
             "status": "unhealthy",
             "message": f"Health check failed: {str(e)}"
+        }
+
+@app.get("/api/health")
+async def api_health_check():
+    """
+    API-prefixed health check endpoint to test API routing
+    """
+    try:
+        logger.info("API health check endpoint called")
+        return {
+            "status": "healthy",
+            "message": "BookBodh API endpoint is accessible",
+            "version": "1.0.0",
+            "api_routing": "working"
+        }
+    except Exception as e:
+        logger.error(f"API health check failed: {str(e)}")
+        return {
+            "status": "unhealthy",
+            "message": f"API health check failed: {str(e)}"
         }
 
 @app.get("/api-routes")
