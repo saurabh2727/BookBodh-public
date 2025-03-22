@@ -254,7 +254,10 @@ async def test_book_extraction(book_id: str, title: str = "Test Book"):
         # Initialize extractor
         extractor = BookExtractor(cache_dir=cache_dir)
         
-        # Start extraction
+        # Log the Google Books ID we're using
+        logger.info(f"Testing extraction for Google Books ID: {book_id}")
+        
+        # Start extraction using the provided ID (which should be a Google Books ID)
         extracted_text, screenshot_paths = extractor.extract_from_google_books(book_id, title, max_pages=3)
         
         # Format results

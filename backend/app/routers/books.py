@@ -1,14 +1,19 @@
 
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from fastapi.responses import JSONResponse
-from typing import List, Dict
+from typing import List, Dict, Optional
 import os
 import uuid
 import httpx
+import logging
 
 from app.config.settings import settings
 from app.database.books import BookDatabase
 from app.database.embeddings import EmbeddingStore
+
+# Configure logger
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["books"])
 
@@ -23,28 +28,105 @@ async def trigger_extraction(book_id: str, external_id: str = None):
     Background task to trigger extraction for a newly added book
     """
     try:
-        # Determine the API URL based on environment
-        api_base_url = os.environ.get("BACKEND_API_URL", "http://localhost:8000")
-        extraction_url = f"{api_base_url}/extract-book/{book_id}"
+        logger.info(f"Starting extraction for book_id={book_id}, external_id={external_id}")
         
-        payload = {"book_id": book_id, "force": False}
-        if external_id:
-            payload["external_id"] = external_id
-            
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                extraction_url, 
-                json=payload,
-                timeout=60
+        # Create book database instance
+        book_db = BookDatabase()
+        
+        # Update book status to extracting
+        book_db.update_book_status(book_id, "extracting")
+        
+        # Create the extractor helper
+        from app.services.book_extraction import BookExtractor
+        extractor = BookExtractor()
+        
+        # Get book details from database
+        book_details = book_db.get_book(book_id)
+        if not book_details:
+            logger.error(f"Book not found in database: {book_id}")
+            book_db.update_book_status(book_id, "error", "Book not found in database")
+            return
+        
+        title = book_details.get('title', 'Unknown Title')
+        author = book_details.get('author', 'Unknown Author')
+        
+        # Determine which ID to use for Google Books
+        # IMPORTANT: We prioritize external_id (Google Books ID) over database ID
+        extraction_id = external_id or book_details.get('external_id') or book_id
+        
+        logger.info(f"Using ID for Google Books extraction: {extraction_id}")
+        logger.info(f"Book title: {title}, Author: {author}")
+        
+        # Extract text from Google Books
+        extracted_text, screenshot_paths = extractor.extract_from_google_books(
+            book_id=extraction_id,  # Use the Google Books ID here!
+            title=title,
+            max_pages=30  # Increase from default 20
+        )
+        
+        logger.info(f"Extraction completed with {len(screenshot_paths)} screenshots")
+        logger.info(f"Extracted text length: {len(extracted_text)} characters")
+        
+        # Process the extracted text into chunks
+        if extracted_text and len(extracted_text) > 200:
+            chunks = extractor.process_book_to_chunks(
+                book_id=book_id,  # Use the database ID for storage
+                text=extracted_text,
+                title=title,
+                author=author
             )
             
-            if response.status_code == 202:
-                print(f"Extraction successfully triggered for book {book_id} (External ID: {external_id})")
+            logger.info(f"Created {len(chunks)} chunks from extracted text")
+            
+            # Add chunks to database
+            successful_chunks = 0
+            for chunk in chunks:
+                try:
+                    book_db.add_chunk(
+                        book_id=book_id,  # Use the database ID for storage
+                        chunk_index=chunk['chunk_index'],
+                        title=chunk['title'],
+                        text=chunk['text'],
+                        author=chunk['author']
+                    )
+                    successful_chunks += 1
+                except Exception as e:
+                    logger.error(f"Error adding chunk {chunk['chunk_index']}: {str(e)}")
+            
+            # Update book status
+            if successful_chunks > 0:
+                book_db.update_book(
+                    book_id=book_id,
+                    status="processed",
+                    chunks_count=successful_chunks
+                )
+                logger.info(f"Book marked as processed with {successful_chunks} chunks")
             else:
-                print(f"Failed to trigger extraction for book {book_id}: {response.text}")
-    
+                book_db.update_book_status(
+                    book_id=book_id,
+                    status="error",
+                    summary=f"Failed to add any chunks. Extraction produced text but chunks couldn't be stored."
+                )
+                logger.error(f"No chunks could be stored for book {book_id}")
+        else:
+            logger.error(f"Insufficient text extracted: {len(extracted_text) if extracted_text else 0} chars")
+            book_db.update_book_status(
+                book_id=book_id,
+                status="error", 
+                summary=f"Insufficient text extracted: {len(extracted_text) if extracted_text else 0} characters"
+            )
     except Exception as e:
-        print(f"Error triggering extraction for book {book_id}: {str(e)}")
+        logger.error(f"Exception during extraction process: {str(e)}", exc_info=True)
+        try:
+            # Try to update the book status to error
+            book_db = BookDatabase()
+            book_db.update_book_status(
+                book_id=book_id, 
+                status="error", 
+                summary=f"Extraction error: {str(e)}"
+            )
+        except Exception as update_error:
+            logger.error(f"Failed to update book status after error: {str(update_error)}")
 
 # The direct upload-book endpoint is no longer needed since we're using Google Books API
 # We'll keep a simplified endpoint for API compatibility
@@ -63,10 +145,32 @@ async def upload_book_compatibility(background_tasks: BackgroundTasks):
     )
 
 @router.post("/extract-book/{book_id}", status_code=202)
-async def extract_book(book_id: str, background_tasks: BackgroundTasks, external_id: str = None):
+async def extract_book(
+    book_id: str, 
+    background_tasks: BackgroundTasks, 
+    external_id: Optional[str] = None,
+    force: bool = False
+):
     """
     Endpoint to trigger extraction for a newly added book
     """
+    logger.info(f"Extract book endpoint called for book_id={book_id}, external_id={external_id}, force={force}")
+    
+    # If force is False, check if the book already has chunks
+    if not force:
+        book_db = BookDatabase()
+        book = book_db.get_book(book_id)
+        chunks = book_db.get_chunks_by_book_id(book_id)
+        
+        if book and book.get('status') == 'processed' and chunks and len(chunks) > 0:
+            logger.info(f"Book {book_id} already has {len(chunks)} chunks and is marked as processed")
+            return {
+                "status": "already_processed",
+                "book_id": book_id,
+                "chunks_count": len(chunks),
+                "message": "Book already has extracted content. Use force=true to re-extract."
+            }
+    
     # Now passing both IDs to the background task
     background_tasks.add_task(trigger_extraction, book_id, external_id)
     
@@ -78,11 +182,17 @@ async def extract_book(book_id: str, background_tasks: BackgroundTasks, external
     }
 
 @router.post("/books/{book_id}/extract", status_code=202)
-async def trigger_book_extraction(book_id: str, background_tasks: BackgroundTasks, external_id: str = None):
+async def trigger_book_extraction(
+    book_id: str, 
+    background_tasks: BackgroundTasks, 
+    external_id: Optional[str] = None,
+    force: bool = False
+):
     """
     Endpoint to manually trigger extraction for a book
     """
     # Now passing both IDs to the background task
+    logger.info(f"Manual extraction triggered for book_id={book_id}, external_id={external_id}, force={force}")
     background_tasks.add_task(trigger_extraction, book_id, external_id)
     
     return {

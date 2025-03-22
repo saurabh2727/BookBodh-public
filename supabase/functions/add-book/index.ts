@@ -5,14 +5,16 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.38.4";
 import { v4 as uuidv4 } from "https://esm.sh/uuid@11.0.0";
 
 // This is a helper function to trigger extraction for a newly added book
-// Modified to pass both the database UUID and external Google Books ID
+// Modified to prioritize external Google Books ID for extraction
 async function triggerExtraction(bookId: string, externalId: string) {
   try {
-    console.log(`Triggering extraction for book ${bookId} (External ID: ${externalId})`);
+    console.log(`Triggering extraction for book ${bookId} (External Google Books ID: ${externalId})`);
     
     // Get the backend API URL from environment or use default
     const apiUrl = Deno.env.get("BACKEND_API_URL") || "https://ethical-wisdom-bot.lovable.app";
     const extractionUrl = `${apiUrl}/extract-book/${bookId}`;
+    
+    console.log(`Calling extraction API at: ${extractionUrl}`);
     
     const response = await fetch(extractionUrl, {
       method: "POST",
@@ -21,12 +23,13 @@ async function triggerExtraction(bookId: string, externalId: string) {
       },
       body: JSON.stringify({ 
         book_id: bookId,
-        external_id: externalId  // Pass the Google Books ID as well
+        external_id: externalId  // Pass the Google Books ID
       }),
     });
     
     if (response.ok) {
-      console.log(`Extraction initiated successfully for book ${bookId} (External ID: ${externalId})`);
+      const result = await response.json();
+      console.log(`Extraction initiated successfully: ${JSON.stringify(result)}`);
       return true;
     } else {
       console.error(`Failed to initiate extraction for book ${bookId}: ${await response.text()}`);
@@ -64,7 +67,7 @@ serve(async (req) => {
     // Generate a proper UUID to use as the database ID
     // Keep the original bookId as an external_id or source_id field
     const generatedUuid = uuidv4();
-    console.log(`Original book ID: ${originalBookId}, Generated UUID: ${generatedUuid}`);
+    console.log(`Original Google Books ID: ${originalBookId}, Generated database UUID: ${generatedUuid}`);
 
     // Initialize Supabase client
     const supabase = createClient(
@@ -141,10 +144,10 @@ serve(async (req) => {
     // After successfully adding the book, trigger extraction in the background
     if (data && data.length > 0 && data[0].id) {
       const addedBookId = data[0].id;
-      console.log(`Book added successfully with ID: ${addedBookId}. Triggering extraction...`);
+      console.log(`Book added successfully with database ID: ${addedBookId}, Google Books ID: ${originalBookId}`);
       
       // Use Edge Runtime waitUntil to run extraction in the background
-      // Now passing both the database UUID and the original Google Books ID
+      // IMPORTANT: We're passing both the database UUID and the original Google Books ID
       EdgeRuntime.waitUntil((async () => {
         const extractionStarted = await triggerExtraction(addedBookId, originalBookId);
         
