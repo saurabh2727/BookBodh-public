@@ -12,9 +12,13 @@ async function triggerExtraction(bookId: string, externalId: string) {
     
     // Get the backend API URL from environment or use default
     const apiUrl = Deno.env.get("BACKEND_API_URL") || "https://ethical-wisdom-bot.lovable.app";
-    const extractionUrl = `${apiUrl}/extract-book/${bookId}`;
+    
+    // Add trailing slash if needed
+    const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
+    const extractionUrl = `${baseUrl}/extract-book/${bookId}`;
     
     console.log(`Calling extraction API at: ${extractionUrl}`);
+    console.log(`Payload: { book_id: ${bookId}, external_id: ${externalId} }`);
     
     const response = await fetch(extractionUrl, {
       method: "POST",
@@ -23,16 +27,30 @@ async function triggerExtraction(bookId: string, externalId: string) {
       },
       body: JSON.stringify({ 
         book_id: bookId,
-        external_id: externalId  // Pass the Google Books ID
+        external_id: externalId
       }),
     });
     
-    if (response.ok) {
+    // Log detailed response information for debugging
+    console.log(`Response status: ${response.status}`);
+    console.log(`Response content type: ${response.headers.get('content-type')}`);
+    
+    // Check if the response is JSON
+    const contentType = response.headers.get('content-type');
+    if (contentType && contentType.includes('application/json')) {
       const result = await response.json();
-      console.log(`Extraction initiated successfully: ${JSON.stringify(result)}`);
+      console.log(`Extraction API response: ${JSON.stringify(result)}`);
       return true;
     } else {
-      console.error(`Failed to initiate extraction for book ${bookId}: ${await response.text()}`);
+      // If not JSON, log the text response for debugging
+      const textResponse = await response.text();
+      console.error(`Non-JSON response received: ${textResponse.substring(0, 500)}...`);
+      
+      // Check if this is likely an HTML error page
+      if (textResponse.includes('<!DOCTYPE') || textResponse.includes('<html>')) {
+        console.error('Received HTML response instead of JSON. The backend endpoint might be returning an error page.');
+      }
+      
       return false;
     }
   } catch (error) {
