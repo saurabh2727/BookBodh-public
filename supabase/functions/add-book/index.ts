@@ -1,4 +1,3 @@
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.38.4";
@@ -10,51 +9,71 @@ async function triggerExtraction(bookId: string, externalId: string) {
   try {
     console.log(`Triggering extraction for book ${bookId} (External Google Books ID: ${externalId})`);
     
-    // Get the backend API URL from environment or use default
-    const apiUrl = Deno.env.get("BACKEND_API_URL") || "https://ethical-wisdom-bot.lovable.app";
+    // Get the backend API URL from environment or use default with new project name
+    const apiUrl = Deno.env.get("BACKEND_API_URL") || "https://bookbodh.lovable.app";
     
     // Add trailing slash if needed
     const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
     
     // IMPORTANT: Make sure we're hitting the API endpoint, not the frontend route
-    // Use /api prefix to ensure we're hitting the backend API
+    // Always use /api prefix to ensure we're hitting the backend API
     const extractionUrl = `${baseUrl}/api/extract-book/${bookId}`;
     
     console.log(`Calling extraction API at: ${extractionUrl}`);
     console.log(`Payload: { book_id: ${bookId}, external_id: ${externalId} }`);
     
-    const response = await fetch(extractionUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ 
-        book_id: bookId,
-        external_id: externalId
-      }),
-    });
+    // Set timeout to 30 seconds to give the server enough time to respond
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
     
-    // Log detailed response information for debugging
-    console.log(`Response status: ${response.status}`);
-    console.log(`Response content type: ${response.headers.get('content-type')}`);
-    
-    // Check if the response is JSON
-    const contentType = response.headers.get('content-type');
-    if (contentType && contentType.includes('application/json')) {
-      const result = await response.json();
-      console.log(`Extraction API response: ${JSON.stringify(result)}`);
-      return true;
-    } else {
-      // If not JSON, log the text response for debugging
-      const textResponse = await response.text();
-      console.error(`Non-JSON response received: ${textResponse.substring(0, 500)}...`);
+    try {
+      const response = await fetch(extractionUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ 
+          book_id: bookId,
+          external_id: externalId,
+          force: true // Always force extraction to ensure it happens
+        }),
+        signal: controller.signal
+      });
       
-      // Check if this is likely an HTML error page
-      if (textResponse.includes('<!DOCTYPE') || textResponse.includes('<html>')) {
-        console.error('Received HTML response instead of JSON. The backend endpoint might be returning an error page.');
-        console.error('This suggests we are hitting the frontend instead of the API - need to use the correct API URL');
+      clearTimeout(timeoutId);
+      
+      // Log detailed response information for debugging
+      console.log(`Response status: ${response.status}`);
+      console.log(`Response content type: ${response.headers.get('content-type')}`);
+      
+      // Check if the response is JSON
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        const result = await response.json();
+        console.log(`Extraction API response: ${JSON.stringify(result)}`);
+        return true;
+      } else {
+        // If not JSON, log the text response for debugging
+        const textResponse = await response.text();
+        console.error(`Non-JSON response received: ${textResponse.substring(0, 500)}...`);
+        
+        // Check if this is likely an HTML error page
+        if (textResponse.includes('<!DOCTYPE') || textResponse.includes('<html>')) {
+          console.error('Received HTML response instead of JSON. The backend endpoint might be returning an error page.');
+          console.error(`This suggests we are hitting the frontend instead of the API - need to use the correct API URL: ${extractionUrl}`);
+          console.error(`Current project name is 'bookbodh', make sure backend is configured correctly`);
+        }
+        
+        return false;
       }
-      
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+      if (fetchError.name === 'AbortError') {
+        console.error(`Request timed out after 30 seconds: ${extractionUrl}`);
+      } else {
+        console.error(`Fetch error in triggerExtraction: ${fetchError.message}`);
+        console.error(`Stack trace: ${fetchError.stack}`);
+      }
       return false;
     }
   } catch (error) {
