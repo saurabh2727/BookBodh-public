@@ -11,28 +11,34 @@ export type Database = {
     Tables: {
       book_chunks: {
         Row: {
+          author: string | null
           book_id: string
           chunk_index: number
           created_at: string
           id: string
+          is_preview_info: boolean | null
           summary: string | null
           text: string
           title: string
         }
         Insert: {
+          author?: string | null
           book_id: string
           chunk_index: number
           created_at?: string
           id?: string
+          is_preview_info?: boolean | null
           summary?: string | null
           text: string
           title: string
         }
         Update: {
+          author?: string | null
           book_id?: string
           chunk_index?: number
           created_at?: string
           id?: string
+          is_preview_info?: boolean | null
           summary?: string | null
           text?: string
           title?: string
@@ -53,6 +59,7 @@ export type Database = {
           category: string
           chunks_count: number | null
           created_at: string
+          embed_url: string | null
           external_id: string | null
           file_url: string
           icon_url: string | null
@@ -67,6 +74,7 @@ export type Database = {
           category: string
           chunks_count?: number | null
           created_at?: string
+          embed_url?: string | null
           external_id?: string | null
           file_url: string
           icon_url?: string | null
@@ -81,6 +89,7 @@ export type Database = {
           category?: string
           chunks_count?: number | null
           created_at?: string
+          embed_url?: string | null
           external_id?: string | null
           file_url?: string
           icon_url?: string | null

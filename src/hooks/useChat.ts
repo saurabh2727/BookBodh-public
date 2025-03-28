@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { ChatMessage } from '../types';
@@ -191,7 +190,6 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
     };
   }, [selectedBookId, selectedBook, messages, extractionAttempts, maxExtractionAttempts]);
 
-  // Reset attempted load state when book changes
   useEffect(() => {
     setHasAttemptedLoad(false);
     setExtractionAttempts(0);
@@ -248,7 +246,8 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
               title: chunk.title || selectedBook || 'Unknown',
               author: chunk.author || 'Unknown',
               text: chunk.text || '',
-              summary: chunk.summary || chunk.text?.substring(0, 200) || ''
+              summary: chunk.summary || chunk.text?.substring(0, 200) || '',
+              is_preview_info: chunk.is_preview_info
             }))
           : undefined
       };
@@ -261,6 +260,9 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
       });
       
       const response = await sendChatRequest(requestPayload);
+
+      // Process the response, check for embed URL
+      const embedUrl = response.embedUrl;
 
       // If we're still polling for extraction results, check for new chunks
       if (extractionInProgress && selectedBookId) {
@@ -307,6 +309,7 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
                       },
                     ]
                   : undefined,
+                embedUrl: embedUrl
               }
             : msg
         )

@@ -1,10 +1,8 @@
 
 import React from 'react';
-import { ChatMessage as ChatMessageType } from '@/types';
-import { cn } from '@/lib/utils';
-import { Card, CardContent } from '@/components/ui/card';
+import { ChatMessage as ChatMessageType, Citation } from '@/types';
+import { formatRelativeTime } from '@/lib/utils';
 import BookCitation from './BookCitation';
-import { User, Bot, BookOpen } from 'lucide-react';
 
 interface ChatMessageProps {
   message: ChatMessageType;
@@ -12,149 +10,116 @@ interface ChatMessageProps {
 
 const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
   const isUser = message.type === 'user';
+  const hasBookCitation = message.citations && message.citations.length > 0;
+  const hasEmbedUrl = message.embedUrl && message.embedUrl.length > 0;
   
-  // For loading animation
-  if (message.isLoading) {
-    return (
-      <div className="flex items-start gap-3 max-w-2xl mx-auto animate-fade-in mb-6">
-        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-          <Bot className="h-4 w-4 text-primary" />
-        </div>
-        <Card className="message-card bg-card/80 border border-border/50 shadow-subtle w-full">
-          <CardContent className="p-4">
-            <div className="flex gap-2">
-              <div className="h-2 w-2 rounded-full bg-primary/60 animate-chat-pulse"></div>
-              <div className="h-2 w-2 rounded-full bg-primary/60 animate-chat-pulse delay-150"></div>
-              <div className="h-2 w-2 rounded-full bg-primary/60 animate-chat-pulse delay-300"></div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  // Function to create a safe HTML representation 
-  const createMarkup = (content: string) => {
-    if (!content) return { __html: "" };
-    
-    // Check if content has an embedded book link
-    const bookPreviewRegex = /https:\/\/www\.google\.com\/books\/edition\/_\/[a-zA-Z0-9_-]+\?hl=en&gbpv=1/g;
-    const bookEmbedRegex = /https:\/\/books\.google\.[a-z.]+\/books\?id=[a-zA-Z0-9_-]+&lpg=.+&pg=.+&output=embed/g;
-    
-    // Check if content contains a Google Books URL but is not entirely a URL
-    const hasBookPreview = bookPreviewRegex.test(content) || bookEmbedRegex.test(content);
-    
-    // Extract clean text content
-    let cleanText = content;
-    
-    // Check for HTML tags and remove them if present
-    const hasHtmlTags = /<[a-z][\s\S]*>/i.test(cleanText);
-    if (hasHtmlTags) {
-      cleanText = cleanText.replace(/<\/?[^>]+(>|$)/g, "");
+  // Check for Google Books embedded viewer in the content
+  const extractEmbedUrl = () => {
+    if (hasEmbedUrl) {
+      return message.embedUrl;
     }
     
-    // Preserve line breaks
-    cleanText = cleanText.replace(/\n/g, '<br />');
+    // Look for book preview URL in the content
+    const content = message.content || '';
+    const previewRegex = /preview this book at: (https:\/\/[^\s]+)/i;
+    const embedRegex = /embed link: (https:\/\/[^\s]+)/i;
     
-    return { __html: cleanText };
-  };
-
-  // Check if message contains a book preview URL
-  const containsBookPreview = () => {
-    if (!message.content) return false;
-    
-    const bookPreviewRegex = /https:\/\/www\.google\.com\/books\/edition\/_\/[a-zA-Z0-9_-]+\?hl=en&gbpv=1/g;
-    const bookEmbedRegex = /https:\/\/books\.google\.[a-z.]+\/books\?id=[a-zA-Z0-9_-]+&lpg=.+&pg=.+&output=embed/g;
-    
-    return bookPreviewRegex.test(message.content) || bookEmbedRegex.test(message.content);
-  };
-
-  // Extract book preview URL if present
-  const getBookPreviewUrl = () => {
-    if (!message.content) return null;
-    
-    // Look for Google Books preview URL patterns
-    const bookPreviewRegex = /https:\/\/www\.google\.com\/books\/edition\/_\/([a-zA-Z0-9_-]+)\?hl=en&gbpv=1/;
-    const bookEmbedRegex = /https:\/\/books\.google\.[a-z.]+\/books\?id=([a-zA-Z0-9_-]+)&lpg=.+&pg=.+&output=embed/;
-    
-    // Check for preview URL
-    const previewMatch = message.content.match(bookPreviewRegex);
-    if (previewMatch) {
-      const bookId = previewMatch[1];
-      // Create a better embed URL for the iframe
-      return `https://books.google.com/books?id=${bookId}&lpg=PP1&pg=PP1&output=embed`;
+    const previewMatch = content.match(previewRegex);
+    if (previewMatch && previewMatch[1]) {
+      const previewUrl = previewMatch[1].trim();
+      
+      // Convert preview URL to an embed URL if needed
+      if (previewUrl.includes('books.google.com') || previewUrl.includes('google.com/books')) {
+        const bookIdMatch = previewUrl.match(/\/([a-zA-Z0-9_-]+)(\?|$)/);
+        if (bookIdMatch && bookIdMatch[1]) {
+          return `https://books.google.com/books?id=${bookIdMatch[1]}&lpg=PP1&pg=PP1&output=embed`;
+        }
+        return previewUrl;
+      }
     }
     
-    // Check for embed URL
-    const embedMatch = message.content.match(bookEmbedRegex);
-    if (embedMatch) {
-      return message.content.match(bookEmbedRegex)?.[0] || null;
+    const embedMatch = content.match(embedRegex);
+    if (embedMatch && embedMatch[1]) {
+      return embedMatch[1].trim();
     }
     
     return null;
   };
-
-  const bookPreviewUrl = getBookPreviewUrl();
-  const hasBookPreview = containsBookPreview();
+  
+  // Clean the message content to remove embed links that will be displayed as iframes
+  const getCleanContent = () => {
+    if (!message.content) return '';
+    
+    let content = message.content;
+    
+    // Remove the preview URL line if we're displaying it as an iframe
+    if (extractEmbedUrl()) {
+      content = content
+        .replace(/\n*You can preview this book at: https:\/\/[^\n]+\n*/g, '')
+        .replace(/\n*Embed link: https:\/\/[^\n]+\n*/g, '')
+        .replace(/\n*A preview of this book is available at: https:\/\/[^\n]+\n*/g, '');
+    }
+    
+    return content;
+  };
+  
+  const embedUrl = extractEmbedUrl();
+  const cleanContent = getCleanContent();
 
   return (
-    <div 
-      className={cn(
-        "flex items-start gap-3 max-w-2xl mx-auto mb-6",
-        isUser ? "animate-slide-in-right justify-end" : "animate-slide-in-left"
-      )}
-    >
-      {!isUser && (
-        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-          <Bot className="h-4 w-4 text-primary" />
-        </div>
-      )}
-      
-      <div className="space-y-3 flex-1">
-        <Card className={cn(
-          "message-card border border-border/50 shadow-subtle",
+    <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} mb-4`}>
+      <div className="flex items-start gap-2 max-w-3xl">
+        <div className={`flex-1 rounded-lg px-4 py-2 shadow ${
           isUser 
-            ? "bg-primary text-primary-foreground" 
-            : "bg-card/80"
-        )}>
-          <CardContent className="p-4">
-            <div 
-              className="text-sm prose dark:prose-invert max-w-none" 
-              dangerouslySetInnerHTML={createMarkup(message.content)}
-            />
-            
-            {/* Render Google Books Preview if available */}
-            {!isUser && hasBookPreview && bookPreviewUrl && (
-              <div className="mt-4 border border-border rounded-md overflow-hidden">
-                <div className="bg-muted px-3 py-1 text-xs flex items-center gap-1">
-                  <BookOpen className="h-3 w-3" />
-                  <span>Book Preview</span>
+            ? 'bg-primary text-primary-foreground' 
+            : 'bg-muted'
+        }`}>
+          {message.isLoading ? (
+            <div className="flex items-center space-x-2">
+              <div className="h-2 w-2 animate-bounce rounded-full bg-current"></div>
+              <div className="h-2 w-2 animate-bounce rounded-full bg-current" style={{ animationDelay: '0.2s' }}></div>
+              <div className="h-2 w-2 animate-bounce rounded-full bg-current" style={{ animationDelay: '0.4s' }}></div>
+            </div>
+          ) : (
+            <div className="prose dark:prose-invert max-w-none">
+              {cleanContent.split('\n').map((paragraph, i) => (
+                <p key={i} className={paragraph.trim() === '' ? 'my-2' : ''}>
+                  {paragraph}
+                </p>
+              ))}
+              
+              {/* Render Google Books embed iframe if available */}
+              {embedUrl && (
+                <div className="mt-4 mb-2">
+                  <p className="text-sm mb-2">Book Preview:</p>
+                  <iframe 
+                    src={embedUrl}
+                    width="100%" 
+                    height="500px" 
+                    frameBorder="0" 
+                    allow="fullscreen" 
+                    className="rounded-md border shadow-sm"
+                    title="Book Preview"
+                  ></iframe>
                 </div>
-                <iframe 
-                  src={bookPreviewUrl}
-                  className="w-full aspect-[4/3] border-0"
-                  allow="encrypted-media"
-                  allowFullScreen
-                ></iframe>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-        
-        {message.citations && message.citations.length > 0 && (
-          <div className="space-y-2">
-            {message.citations.map((citation, index) => (
-              <BookCitation key={index} citation={citation} />
-            ))}
-          </div>
-        )}
-      </div>
-      
-      {isUser && (
-        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-muted flex items-center justify-center">
-          <User className="h-4 w-4 text-muted-foreground" />
+              )}
+              
+              {hasBookCitation && (
+                <div className="mt-3">
+                  <BookCitation 
+                    book={message.citations[0].book} 
+                    author={message.citations[0].author} 
+                    page={message.citations[0].page} 
+                  />
+                </div>
+              )}
+            </div>
+          )}
         </div>
-      )}
+      </div>
+      <span className="text-xs text-muted-foreground mt-1">
+        {formatRelativeTime(message.timestamp)}
+      </span>
     </div>
   );
 };
