@@ -1,15 +1,15 @@
 
 import React from 'react';
-import { Citation } from '@/types';
 import { Card, CardContent } from '@/components/ui/card';
-import { Separator } from '@/components/ui/separator';
 import { Book } from 'lucide-react';
 
 interface BookCitationProps {
-  citation: Citation;
+  title: string;
+  author: string;
+  pageNumber: number;
 }
 
-const BookCitation: React.FC<BookCitationProps> = ({ citation }) => {
+const BookCitation: React.FC<BookCitationProps> = ({ title, author, pageNumber }) => {
   return (
     <Card className="message-card bg-accent/80 border-accent overflow-hidden animate-fade-in">
       <CardContent className="p-4 flex items-center gap-3">
@@ -18,10 +18,10 @@ const BookCitation: React.FC<BookCitationProps> = ({ citation }) => {
         </div>
         <div className="space-y-0.5 flex-1">
           <p className="font-medium text-sm text-foreground/90">
-            {citation.book}
+            {title}
           </p>
           <p className="text-xs text-muted-foreground">
-            {citation.author} • Page {citation.page}
+            {author} • Page {pageNumber}
           </p>
         </div>
       </CardContent>
