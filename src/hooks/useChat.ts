@@ -20,6 +20,8 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
   const [hasAttemptedLoad, setHasAttemptedLoad] = useState(false);
   const [bookStatus, setBookStatus] = useState<string | null>(null);
   const extractionPollingInterval = 5000; // Poll every 5 seconds for extraction status
+  const maxExtractionAttempts = 6; // Maximum polling attempts (30 seconds total)
+  const [extractionAttempts, setExtractionAttempts] = useState(0);
 
   useEffect(() => {
     let pollingTimer: number | null = null;
@@ -35,8 +37,9 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
           if (!chunks || chunks.length === 0) {
             console.warn('No chunks found for book ID:', selectedBookId);
             
-            // Check if extraction is in progress rather than triggering a new one
+            // Mark extraction as in progress so we can display appropriate messages
             setExtractionInProgress(true);
+            setExtractionAttempts(0);
             
             setMessages(prev => [
               ...prev,
@@ -55,6 +58,9 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
               pollingTimer = window.setInterval(async () => {
                 console.log('Polling for book chunks...');
                 try {
+                  // Increment the attempt counter
+                  setExtractionAttempts(prev => prev + 1);
+                  
                   const updatedChunks = await fetchBookChunks(selectedBookId);
                   if (updatedChunks && updatedChunks.length > 0) {
                     console.log(`Found ${updatedChunks.length} chunks on polling`);
@@ -75,9 +81,46 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
                         isBookWelcome: true
                       }
                     ]);
+                  } else if (extractionAttempts >= maxExtractionAttempts) {
+                    // We've reached the maximum polling attempts, stop polling
+                    window.clearInterval(pollingTimer!);
+                    pollingTimer = null;
+                    setExtractionInProgress(false);
+                    
+                    // Update the message to inform the user that extraction is taking longer than expected
+                    setMessages(prev => [
+                      ...prev.filter(msg => !msg.isExtractionStatus),
+                      {
+                        id: uuidv4(),
+                        content: "The book's content extraction is taking longer than expected. I'll do my best to answer your questions based on general knowledge. You can still chat about this book, and I'll try to help as much as I can.",
+                        type: 'bot',
+                        timestamp: new Date(),
+                        isSystemMessage: true,
+                        isExtractionStatus: true
+                      }
+                    ]);
                   }
                 } catch (err) {
                   console.error('Error polling for book chunks:', err);
+                  
+                  // If we've hit max attempts, stop polling and notify the user
+                  if (extractionAttempts >= maxExtractionAttempts) {
+                    window.clearInterval(pollingTimer!);
+                    pollingTimer = null;
+                    setExtractionInProgress(false);
+                    
+                    setMessages(prev => [
+                      ...prev.filter(msg => !msg.isExtractionStatus),
+                      {
+                        id: uuidv4(),
+                        content: "I wasn't able to retrieve the book's content. I'll do my best to answer your questions based on general knowledge. You can still chat about this book, and I'll try to help as much as I can.",
+                        type: 'bot',
+                        timestamp: new Date(),
+                        isSystemMessage: true,
+                        isExtractionStatus: true
+                      }
+                    ]);
+                  }
                 }
               }, extractionPollingInterval);
             }
@@ -128,6 +171,7 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
         setBookChunks([]);
         setExtractionInProgress(false);
         setHasAttemptedLoad(false); // Reset when book id changes
+        setExtractionAttempts(0);
         
         // Clear the polling timer if it exists
         if (pollingTimer) {
@@ -145,11 +189,12 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
         window.clearInterval(pollingTimer);
       }
     };
-  }, [selectedBookId, selectedBook, messages]);
+  }, [selectedBookId, selectedBook, messages, extractionAttempts, maxExtractionAttempts]);
 
   // Reset attempted load state when book changes
   useEffect(() => {
     setHasAttemptedLoad(false);
+    setExtractionAttempts(0);
   }, [selectedBookId]);
 
   const handleSubmit = async (query: string) => {

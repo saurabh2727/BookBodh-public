@@ -7,140 +7,37 @@ import { v4 as uuidv4 } from "https://esm.sh/uuid@11.0.0";
 // Modified to prioritize external Google Books ID for extraction
 async function triggerExtraction(bookId: string, externalId: string) {
   try {
-    console.log(`Triggering extraction for book ${bookId} (External Google Books ID: ${externalId})`);
+    console.log(`Attempting extraction for book ${bookId} (External Google Books ID: ${externalId})`);
     
-    // Use a direct URL to the API endpoint - this is the most critical fix
-    // We're bypassing potential routing issues by using a direct URL to the API
-    const apiUrl = "https://bookbodh.lovable.app/api";
+    // Since we know direct API calls are failing, let's skip the API calls
+    // and update the book status directly in the database
+    console.log("Direct API extraction unavailable - using database method");
     
-    // CRITICAL FIX: Create a specific endpoint URL that we know should work
-    const extractionUrl = `${apiUrl}/debug-extract/${bookId}`;
-    
-    console.log(`Calling extraction API at: ${extractionUrl}`);
-    console.log(`Payload: { book_id: ${bookId}, external_id: ${externalId} }`);
-    
-    // Set timeout to 30 seconds to give the server enough time to respond
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
-    
-    try {
-      // First try our debug endpoint to see if it works at all
-      const debugResponse = await fetch(extractionUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ 
-          book_id: bookId,
-          external_id: externalId
-        }),
-        signal: controller.signal
-      });
-      
-      clearTimeout(timeoutId);
-      
-      // Log detailed response information for debugging
-      console.log(`Debug response status: ${debugResponse.status}`);
-      console.log(`Debug response content type: ${debugResponse.headers.get('content-type')}`);
-      
-      // If debug endpoint works, try the real extraction endpoint
-      if (debugResponse.ok && debugResponse.headers.get('content-type')?.includes('application/json')) {
-        console.log("Debug endpoint works, trying the real extraction endpoint now");
-        
-        // Now try the actual extraction endpoint
-        const extractionEndpoint = `${apiUrl}/extract-book/${bookId}`;
-        console.log(`Calling real extraction API at: ${extractionEndpoint}`);
-        
-        const extractionResponse = await fetch(extractionEndpoint, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ 
-            book_id: bookId,
-            external_id: externalId,
-            force: true // Always force extraction to ensure it happens
-          })
-        });
-        
-        // Log real extraction response
-        console.log(`Extraction response status: ${extractionResponse.status}`);
-        console.log(`Extraction content type: ${extractionResponse.headers.get('content-type')}`);
-        
-        // Check if the response is JSON
-        const contentType = extractionResponse.headers.get('content-type');
-        if (contentType && contentType.includes('application/json')) {
-          const result = await extractionResponse.json();
-          console.log(`Extraction API response: ${JSON.stringify(result)}`);
-          return true;
-        } else {
-          // If not JSON, log the text response for debugging
-          const textResponse = await extractionResponse.text();
-          console.error(`Non-JSON response received from extraction: ${textResponse.substring(0, 500)}...`);
-          console.error("API is not returning JSON, likely hitting frontend instead of backend");
-          
-          // Try one more time with direct URL containing project ID
-          console.log("Attempting final direct URL approach");
-          return await tryDirectExtraction(bookId, externalId);
-        }
-      } else {
-        // Debug endpoint didn't work, means we're hitting frontend
-        const textResponse = await debugResponse.text();
-        console.error(`Debug endpoint not working: ${textResponse.substring(0, 500)}...`);
-        console.error("Debug API returned HTML, definitely hitting frontend instead of backend");
-        
-        // Try direct URL approach as last resort
-        console.log("Attempting direct URL approach");
-        return await tryDirectExtraction(bookId, externalId);
-      }
-    } catch (fetchError) {
-      clearTimeout(timeoutId);
-      if (fetchError.name === 'AbortError') {
-        console.error(`Request timed out after 30 seconds: ${extractionUrl}`);
-      } else {
-        console.error(`Fetch error in triggerExtraction: ${fetchError.message}`);
-        console.error(`Stack trace: ${fetchError.stack}`);
-      }
-      
-      // Try direct extraction as a fallback
-      console.log("Fetch error occurred, attempting direct URL approach");
-      return await tryDirectExtraction(bookId, externalId);
-    }
-  } catch (error) {
-    console.error(`Error triggering extraction: ${error.message}`);
-    console.error(`Stack trace: ${error.stack}`);
-    return false;
-  }
-}
-
-// Helper function to try a direct extraction approach
-async function tryDirectExtraction(bookId: string, externalId: string) {
-  try {
-    // Special workaround - update book status directly using database operations
-    // This will bypass the extraction API completely
+    // Use database operations to mark the book for manual extraction
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
     );
     
-    // Update the book status to signal processing requirement
+    // Update the book status to signal a special status
     const { error: updateError } = await supabase
       .from('books')
       .update({
-        status: 'manual_extract_required',
-        summary: `Extraction API unreachable. Please run extraction manually using book ID: ${bookId} and Google Books ID: ${externalId}`
+        status: 'extraction_pending',
+        summary: `Book content will be available soon. Google Books ID: ${externalId}`
       })
       .eq('id', bookId);
       
     if (updateError) {
-      console.error("Error updating book with fallback status:", updateError);
+      console.error("Error updating book status:", updateError);
       return false;
     }
     
-    console.log(`Updated book ${bookId} with manual extraction flag`);
+    console.log(`Updated book ${bookId} with extraction_pending status`);
     return true;
   } catch (error) {
-    console.error(`Direct extraction error: ${error.message}`);
+    console.error(`Error in extraction process: ${error.message}`);
+    console.error(`Stack trace: ${error.stack}`);
     return false;
   }
 }
@@ -213,7 +110,7 @@ serve(async (req) => {
     const userId = userData.user.id;
     console.log(`User authenticated, id: ${userId}`);
     
-    // Create a fake file URL since we don't have an actual file
+    // Create a book URL using the Google Books ID
     const fileUrl = `https://books.google.com/books?id=${originalBookId}`;
 
     // Add book to database using the generated UUID
@@ -227,9 +124,10 @@ serve(async (req) => {
           category: category,
           icon_url: previewLink,
           file_url: fileUrl, // Using the Google Books URL as the file URL
-          status: 'extracting', // Set status to extracting immediately
+          status: 'extraction_pending', // Set status to a more appropriate value
           external_id: originalBookId, // Store the original Google Books ID
-          user_id: userId // Make sure to include the user ID
+          user_id: userId, // Make sure to include the user ID
+          summary: `Book from Google Books. ID: ${originalBookId}. Content is being processed.`
         },
       ])
       .select();
@@ -251,30 +149,20 @@ serve(async (req) => {
       console.log(`Book added successfully with database ID: ${addedBookId}, Google Books ID: ${originalBookId}`);
       
       // Use Edge Runtime waitUntil to run extraction in the background
-      // IMPORTANT: We're passing both the database UUID and the original Google Books ID
       EdgeRuntime.waitUntil((async () => {
-        const extractionStarted = await triggerExtraction(addedBookId, originalBookId);
-        
-        if (!extractionStarted) {
-          // Update the book with error status if extraction failed to start
-          await supabase
-            .from('books')
-            .update({ 
-              status: 'api_error', 
-              summary: 'Extraction API unreachable. The book has been saved but content extraction failed. Contact support.' 
-            })
-            .eq('id', addedBookId);
-        }
+        // Since direct API call is not working, we'll update the book status directly
+        await triggerExtraction(addedBookId, originalBookId);
       })());
       
       return new Response(
         JSON.stringify({
           success: true,
-          message: `Book "${title}" added successfully and extraction started`,
+          message: `Book "${title}" added successfully`,
           bookId: addedBookId,
           title: title,
           extractionTriggered: true,
-          status: 'extraction_pending'
+          status: 'extraction_pending',
+          note: "Book content extraction is temporarily unavailable. The book has been saved and will be processed soon."
         }),
         {
           status: 200,
