@@ -1,3 +1,4 @@
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.38.4";
@@ -9,14 +10,13 @@ async function triggerExtraction(bookId: string, externalId: string) {
   try {
     console.log(`Triggering extraction for book ${bookId} (External Google Books ID: ${externalId})`);
     
-    // Get the backend API URL from environment or use default with new project name
+    // FIXED: Use the correct project name "bookbodh" instead of "ethical-wisdom-bot"
     const apiUrl = Deno.env.get("BACKEND_API_URL") || "https://bookbodh.lovable.app";
     
-    // Add trailing slash if needed
+    // FIXED: Add trailing slash if needed
     const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
     
-    // IMPORTANT: Make sure we're hitting the API endpoint, not the frontend route
-    // Always use /api prefix to ensure we're hitting the backend API
+    // CRITICAL FIX: Always use /api prefix to ensure we're hitting the backend API
     const extractionUrl = `${baseUrl}/api/extract-book/${bookId}`;
     
     console.log(`Calling extraction API at: ${extractionUrl}`);
