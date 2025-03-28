@@ -3,7 +3,7 @@ import requests
 import json
 import logging
 import html
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 from app.config.settings import settings
 
 # Configure logger
@@ -52,6 +52,10 @@ def generate_response(query: str, chunks: List[Dict]) -> Dict:
     context = ""
     book_citations = {}
     
+    # Log input data
+    logger.info(f"Generating response for query: '{query}'")
+    logger.info(f"Using {len(chunks)} chunks for context")
+    
     for i, chunk in enumerate(chunks):
         # Clean any HTML in the chunk text
         clean_text = sanitize_html(chunk['text']) if 'text' in chunk else ""
@@ -85,12 +89,17 @@ DO NOT include HTML tags in your response."""
     }
     
     try:
+        logger.info(f"Calling Grok API with payload: {json.dumps(payload)[:500]}...")
+        
         response = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers=headers,
             data=json.dumps(payload)
         )
+        
+        logger.info(f"Grok API status code: {response.status_code}")
         logger.info(f"Grok API response: {response.text}")
+        
         response.raise_for_status()
         
         # Extract response from Grok
@@ -99,6 +108,8 @@ DO NOT include HTML tags in your response."""
         
         # Ensure the response is clean of HTML
         response_text = sanitize_html(response_text)
+        
+        logger.info(f"Generated response with content length: {len(response_text)}")
         
         # Determine which book was cited (this is a simple approach)
         cited_book = None

@@ -10,7 +10,7 @@ async function extractFromGoogleBooks(bookId: string, externalId: string) {
     console.log(`Attempting to extract content for book ${bookId} using Google Books API ID: ${externalId}`);
     
     // Call Google Books API to get book details
-    const googleBooksUrl = `https://www.googleapis.com/books/v1/volumes/${externalId}`;
+    const googleBooksUrl = `https://www.googleapis.com/books/v1/volumes/${externalId}?fields=volumeInfo(title,authors,description,previewLink,infoLink,subtitle),searchInfo,accessInfo`;
     console.log(`Calling Google Books API: ${googleBooksUrl}`);
     
     const response = await fetch(googleBooksUrl);
@@ -43,6 +43,21 @@ async function extractFromGoogleBooks(bookId: string, externalId: string) {
       content += "Subtitle: " + bookData.volumeInfo.subtitle + "\n\n";
     }
     
+    // Additional attempt to extract from Google Books Viewer if available
+    let previewAvailable = false;
+    let previewUrl = "";
+    
+    if (bookData.accessInfo?.viewability === "PARTIAL" || bookData.accessInfo?.viewability === "ALL_PAGES") {
+      previewAvailable = true;
+      previewUrl = `https://www.google.com/books/edition/_/${externalId}?hl=en&gbpv=1`;
+      console.log(`Preview is available for this book at: ${previewUrl}`);
+      
+      // Add preview URL to the content for reference
+      content += `\nA preview of this book is available at: ${previewUrl}\n\n`;
+    } else {
+      console.log("No preview available for this book");
+    }
+    
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
@@ -52,13 +67,19 @@ async function extractFromGoogleBooks(bookId: string, externalId: string) {
     if (content.trim().length > 0) {
       console.log(`Successfully extracted ${content.length} characters of content`);
       
-      // Update book with extracted content
+      // Update book with extracted content and preview URL if available
+      const updateData: any = {
+        status: 'completed',
+        summary: summary || content.substring(0, 500)
+      };
+      
+      if (previewAvailable) {
+        updateData.file_url = previewUrl;
+      }
+      
       const { error: updateError } = await supabase
         .from('books')
-        .update({
-          status: 'completed',
-          summary: summary || content.substring(0, 500)
-        })
+        .update(updateData)
         .eq('id', bookId);
         
       if (updateError) {
@@ -66,7 +87,7 @@ async function extractFromGoogleBooks(bookId: string, externalId: string) {
         return { success: false, error: updateError.message };
       }
       
-      // Create chunks from the content
+      // Create chunks from the content - make multiple chunks to improve context
       const chunkSize = 1000;
       const chunks = [];
       
@@ -77,6 +98,9 @@ async function extractFromGoogleBooks(bookId: string, externalId: string) {
           chunk_index: Math.floor(i / chunkSize),
           text: chunkText,
           title: bookData.volumeInfo?.title || "Unknown",
+          author: (bookData.volumeInfo?.authors && bookData.volumeInfo.authors.length > 0) 
+            ? bookData.volumeInfo.authors.join(", ") 
+            : "Unknown",
           summary: summary || chunkText.substring(0, 200)
         });
       }
@@ -104,7 +128,12 @@ async function extractFromGoogleBooks(bookId: string, externalId: string) {
         }
       }
       
-      return { success: true, chunksCount: chunks.length };
+      return { 
+        success: true, 
+        chunksCount: chunks.length,
+        previewAvailable: previewAvailable,
+        previewUrl: previewAvailable ? previewUrl : null 
+      };
     } else {
       console.log("No content available from Google Books API");
       
@@ -198,8 +227,9 @@ serve(async (req) => {
     const userId = userData.user.id;
     console.log(`User authenticated, id: ${userId}`);
     
-    // Create a book URL using the Google Books ID
-    const fileUrl = `https://books.google.com/books?id=${originalBookId}`;
+    // Create a book URL using the Google Books ID - use the preview URL format
+    const fileUrl = `https://books.google.com/books?id=${originalBookId}&printsec=frontcover`;
+    const previewFileUrl = `https://www.google.com/books/edition/_/${originalBookId}?hl=en&gbpv=1`;
 
     // Add book to database using the generated UUID
     const { data, error } = await supabase
@@ -211,7 +241,7 @@ serve(async (req) => {
           author: authors.join(", "),
           category: category,
           icon_url: previewLink,
-          file_url: fileUrl, // Using the Google Books URL as the file URL
+          file_url: previewFileUrl, // Using the Google Books preview URL
           status: 'processing', // Set status to a more appropriate value
           external_id: originalBookId, // Store the original Google Books ID
           user_id: userId, // Make sure to include the user ID

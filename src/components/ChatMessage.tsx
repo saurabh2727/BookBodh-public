@@ -35,15 +35,18 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
 
   // Function to create a safe HTML representation 
   const createMarkup = (content: string) => {
-    // Regular expression to detect HTML content
+    if (!content) return { __html: "" };
+    
+    // Check if content has HTML tags and remove them if present
     const hasHtmlTags = /<[a-z][\s\S]*>/i.test(content);
     
-    // If the content has HTML tags, we'll parse and clean it
     if (hasHtmlTags) {
       // Get plain text by removing HTML tags
-      return { __html: content.replace(/<\/?[^>]+(>|$)/g, "") };
+      const cleanText = content.replace(/<\/?[^>]+(>|$)/g, "");
+      // Preserve line breaks
+      return { __html: cleanText.replace(/\n/g, '<br />') };
     } else {
-      // For plain text, return as is with line breaks preserved
+      // For plain text, just preserve line breaks
       return { __html: content.replace(/\n/g, '<br />') };
     }
   };
@@ -70,7 +73,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
         )}>
           <CardContent className="p-4">
             <div 
-              className="text-sm" 
+              className="text-sm prose dark:prose-invert max-w-none" 
               dangerouslySetInnerHTML={createMarkup(message.content)}
             />
           </CardContent>
