@@ -7,6 +7,23 @@ import { serve } from 'https://deno.land/std@0.131.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/cors.ts';
 
+// Function to sanitize HTML content
+function sanitizeHtml(text: string): string {
+  if (!text) return '';
+  
+  // First unescape HTML entities (would need a proper library for this in production)
+  // This is a simplified approach
+  const unescaped = text
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+  
+  // Remove HTML tags using a simple approach
+  return unescaped.replace(/<\/?[^>]+(>|$)/g, "");
+}
+
 // For fake chat (we'll use actual LLM logic in real implementation)
 const INTRO_PROMPTS = [
   "I'd be happy to discuss this book with you! What would you like to know about it?",
@@ -158,7 +175,10 @@ function generateResponse(query: string, chunks: any[], book: string | null, aut
   }
   
   // Extract text from chunks and join with newlines
-  const chunkTexts = chunks.map(chunk => chunk.text);
+  const chunkTexts = chunks.map(chunk => {
+    // Sanitize any HTML content in chunks
+    return sanitizeHtml(chunk.text || "");
+  });
   
   // Simple heuristic: Find chunks that contain words from the query
   const queryWords = query.toLowerCase().split(/\W+/).filter(word => word.length > 3);
@@ -299,7 +319,13 @@ serve(async (req) => {
     }
 
     // Use provided chunks if available, otherwise fetch them
-    let chunks = providedChunks || [];
+    let chunks = providedChunks ? providedChunks.map(chunk => {
+      return {
+        ...chunk,
+        text: sanitizeHtml(chunk.text || "")
+      };
+    }) : [];
+    
     let book = bookTitle;
     let author = null;
     let bookData = null;

@@ -33,6 +33,21 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
     );
   }
 
+  // Function to create a safe HTML representation 
+  const createMarkup = (content: string) => {
+    // Regular expression to detect HTML content
+    const hasHtmlTags = /<[a-z][\s\S]*>/i.test(content);
+    
+    // If the content has HTML tags, we'll parse and clean it
+    if (hasHtmlTags) {
+      // Get plain text by removing HTML tags
+      return { __html: content.replace(/<\/?[^>]+(>|$)/g, "") };
+    } else {
+      // For plain text, return as is with line breaks preserved
+      return { __html: content.replace(/\n/g, '<br />') };
+    }
+  };
+
   return (
     <div 
       className={cn(
@@ -54,7 +69,10 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
             : "bg-card/80"
         )}>
           <CardContent className="p-4">
-            <p className="text-sm">{message.content}</p>
+            <div 
+              className="text-sm" 
+              dangerouslySetInnerHTML={createMarkup(message.content)}
+            />
           </CardContent>
         </Card>
         
