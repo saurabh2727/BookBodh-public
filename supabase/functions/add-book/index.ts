@@ -1,44 +1,132 @@
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.38.4";
 import { v4 as uuidv4 } from "https://esm.sh/uuid@11.0.0";
 
-// This is a helper function to trigger extraction for a newly added book
-// Modified to prioritize external Google Books ID for extraction
-async function triggerExtraction(bookId: string, externalId: string) {
+// This function attempts to extract content directly from Google Books API
+async function extractFromGoogleBooks(bookId: string, externalId: string) {
   try {
-    console.log(`Attempting extraction for book ${bookId} (External Google Books ID: ${externalId})`);
+    console.log(`Attempting to extract content for book ${bookId} using Google Books API ID: ${externalId}`);
     
-    // Since we know direct API calls are failing, let's skip the API calls
-    // and update the book status directly in the database
-    console.log("Direct API extraction unavailable - using database method");
+    // Call Google Books API to get book details
+    const googleBooksUrl = `https://www.googleapis.com/books/v1/volumes/${externalId}`;
+    console.log(`Calling Google Books API: ${googleBooksUrl}`);
     
-    // Use database operations to mark the book for manual extraction
+    const response = await fetch(googleBooksUrl);
+    if (!response.ok) {
+      console.error(`Google Books API error: ${response.status} ${response.statusText}`);
+      return { success: false, error: `Google Books API error: ${response.status}` };
+    }
+    
+    const bookData = await response.json();
+    
+    // Check if there's a text snippet or description we can use
+    let content = "";
+    let summary = "";
+    
+    if (bookData.volumeInfo?.description) {
+      summary = bookData.volumeInfo.description;
+      content += summary + "\n\n";
+    }
+    
+    if (bookData.searchInfo?.textSnippet) {
+      content += bookData.searchInfo.textSnippet + "\n\n";
+    }
+    
+    // Get any available text snippets from the volume info
+    if (bookData.volumeInfo?.preface) {
+      content += "Preface: " + bookData.volumeInfo.preface + "\n\n";
+    }
+    
+    if (bookData.volumeInfo?.subtitle) {
+      content += "Subtitle: " + bookData.volumeInfo.subtitle + "\n\n";
+    }
+    
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
     );
     
-    // Update the book status to signal a special status
-    const { error: updateError } = await supabase
-      .from('books')
-      .update({
-        status: 'extraction_pending',
-        summary: `Book content will be available soon. Google Books ID: ${externalId}`
-      })
-      .eq('id', bookId);
+    // Check if we got meaningful content
+    if (content.trim().length > 0) {
+      console.log(`Successfully extracted ${content.length} characters of content`);
       
-    if (updateError) {
-      console.error("Error updating book status:", updateError);
-      return false;
+      // Update book with extracted content
+      const { error: updateError } = await supabase
+        .from('books')
+        .update({
+          status: 'completed',
+          summary: summary || content.substring(0, 500)
+        })
+        .eq('id', bookId);
+        
+      if (updateError) {
+        console.error("Error updating book with content:", updateError);
+        return { success: false, error: updateError.message };
+      }
+      
+      // Create chunks from the content
+      const chunkSize = 1000;
+      const chunks = [];
+      
+      for (let i = 0; i < content.length; i += chunkSize) {
+        const chunkText = content.substring(i, i + chunkSize);
+        chunks.push({
+          book_id: bookId,
+          chunk_index: Math.floor(i / chunkSize),
+          text: chunkText,
+          title: bookData.volumeInfo?.title || "Unknown",
+          summary: summary || chunkText.substring(0, 200)
+        });
+      }
+      
+      if (chunks.length > 0) {
+        console.log(`Creating ${chunks.length} content chunks for book ${bookId}`);
+        
+        const { error: chunksError } = await supabase
+          .from('book_chunks')
+          .insert(chunks);
+          
+        if (chunksError) {
+          console.error("Error creating book chunks:", chunksError);
+          return { success: false, error: chunksError.message };
+        }
+        
+        // Update the chunks count in the book record
+        const { error: countError } = await supabase
+          .from('books')
+          .update({ chunks_count: chunks.length })
+          .eq('id', bookId);
+          
+        if (countError) {
+          console.error("Error updating chunks count:", countError);
+        }
+      }
+      
+      return { success: true, chunksCount: chunks.length };
+    } else {
+      console.log("No content available from Google Books API");
+      
+      // If no content is available, update the book status
+      const { error: updateError } = await supabase
+        .from('books')
+        .update({
+          status: 'no_content_available',
+          summary: `No preview text available from Google Books for ID: ${externalId}`
+        })
+        .eq('id', bookId);
+        
+      if (updateError) {
+        console.error("Error updating book status:", updateError);
+      }
+      
+      return { success: false, error: "No content available from Google Books API" };
     }
-    
-    console.log(`Updated book ${bookId} with extraction_pending status`);
-    return true;
   } catch (error) {
-    console.error(`Error in extraction process: ${error.message}`);
+    console.error(`Error extracting content: ${error.message}`);
     console.error(`Stack trace: ${error.stack}`);
-    return false;
+    return { success: false, error: error.message };
   }
 }
 
@@ -124,7 +212,7 @@ serve(async (req) => {
           category: category,
           icon_url: previewLink,
           file_url: fileUrl, // Using the Google Books URL as the file URL
-          status: 'extraction_pending', // Set status to a more appropriate value
+          status: 'processing', // Set status to a more appropriate value
           external_id: originalBookId, // Store the original Google Books ID
           user_id: userId, // Make sure to include the user ID
           summary: `Book from Google Books. ID: ${originalBookId}. Content is being processed.`
@@ -143,15 +231,15 @@ serve(async (req) => {
       );
     }
     
-    // After successfully adding the book, trigger extraction in the background
+    // After successfully adding the book, extract content in the background
     if (data && data.length > 0 && data[0].id) {
       const addedBookId = data[0].id;
       console.log(`Book added successfully with database ID: ${addedBookId}, Google Books ID: ${originalBookId}`);
       
       // Use Edge Runtime waitUntil to run extraction in the background
       EdgeRuntime.waitUntil((async () => {
-        // Since direct API call is not working, we'll update the book status directly
-        await triggerExtraction(addedBookId, originalBookId);
+        const extractionResult = await extractFromGoogleBooks(addedBookId, originalBookId);
+        console.log(`Extraction completed with result:`, extractionResult);
       })());
       
       return new Response(
@@ -161,8 +249,8 @@ serve(async (req) => {
           bookId: addedBookId,
           title: title,
           extractionTriggered: true,
-          status: 'extraction_pending',
-          note: "Book content extraction is temporarily unavailable. The book has been saved and will be processed soon."
+          status: 'processing',
+          note: "Book content extraction is in progress and will be available shortly."
         }),
         {
           status: 200,
