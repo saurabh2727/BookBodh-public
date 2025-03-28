@@ -104,12 +104,12 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
                 </div>
               )}
               
-              {hasBookCitation && (
+              {hasBookCitation && message.citations && (
                 <div className="mt-3">
                   <BookCitation 
-                    book={message.citations[0].book} 
-                    author={message.citations[0].author} 
-                    page={message.citations[0].page} 
+                    title={message.citations[0].book} 
+                    author={message.citations[0].author || 'Unknown'} 
+                    pageNumber={message.citations[0].page || 1} 
                   />
                 </div>
               )}
