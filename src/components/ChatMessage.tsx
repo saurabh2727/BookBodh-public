@@ -104,7 +104,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
                 </div>
               )}
               
-              {hasBookCitation && message.citations && (
+              {hasBookCitation && message.citations && message.citations[0] && (
                 <div className="mt-3">
                   <BookCitation 
                     title={message.citations[0].book} 

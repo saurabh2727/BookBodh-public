@@ -36,7 +36,6 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
           if (!chunks || chunks.length === 0) {
             console.warn('No chunks found for book ID:', selectedBookId);
             
-            // Mark extraction as in progress so we can display appropriate messages
             setExtractionInProgress(true);
             setExtractionAttempts(0);
             
@@ -52,12 +51,10 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
               }
             ]);
             
-            // Start polling for updates
             if (!pollingTimer) {
               pollingTimer = window.setInterval(async () => {
                 console.log('Polling for book chunks...');
                 try {
-                  // Increment the attempt counter
                   setExtractionAttempts(prev => prev + 1);
                   
                   const updatedChunks = await fetchBookChunks(selectedBookId);
@@ -81,12 +78,10 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
                       }
                     ]);
                   } else if (extractionAttempts >= maxExtractionAttempts) {
-                    // We've reached the maximum polling attempts, stop polling
                     window.clearInterval(pollingTimer!);
                     pollingTimer = null;
                     setExtractionInProgress(false);
                     
-                    // Update the message to inform the user that extraction is taking longer than expected
                     setMessages(prev => [
                       ...prev.filter(msg => !msg.isExtractionStatus),
                       {
@@ -102,7 +97,6 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
                 } catch (err) {
                   console.error('Error polling for book chunks:', err);
                   
-                  // If we've hit max attempts, stop polling and notify the user
                   if (extractionAttempts >= maxExtractionAttempts) {
                     window.clearInterval(pollingTimer!);
                     pollingTimer = null;
@@ -150,7 +144,6 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
           console.error('Error loading book chunks:', error);
           setError('Failed to load book data. Please try again later.');
           
-          // Display error to user if extraction was in progress
           if (extractionInProgress) {
             setMessages(prev => [
               ...prev,
@@ -169,10 +162,9 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
       } else if (!selectedBookId) {
         setBookChunks([]);
         setExtractionInProgress(false);
-        setHasAttemptedLoad(false); // Reset when book id changes
+        setHasAttemptedLoad(false);
         setExtractionAttempts(0);
         
-        // Clear the polling timer if it exists
         if (pollingTimer) {
           window.clearInterval(pollingTimer);
           pollingTimer = null;
@@ -182,7 +174,6 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
 
     loadBookChunks();
 
-    // Clean up polling timer on unmount
     return () => {
       if (pollingTimer) {
         window.clearInterval(pollingTimer);
@@ -261,10 +252,8 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
       
       const response = await sendChatRequest(requestPayload);
 
-      // Process the response, check for embed URL
       const embedUrl = response.embedUrl;
 
-      // If we're still polling for extraction results, check for new chunks
       if (extractionInProgress && selectedBookId) {
         try {
           console.log('Checking for newly extracted chunks');
