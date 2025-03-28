@@ -6,6 +6,7 @@ import uuid
 import httpx
 import logging
 import traceback
+import datetime
 
 from app.config.settings import settings
 from app.database.books import BookDatabase
@@ -323,5 +324,50 @@ async def trigger_book_extraction(
                 "book_id": book_id,
                 "message": f"Server error: {str(e)}",
                 "traceback": traceback.format_exc()
+            }
+        )
+
+# Add a special debug endpoint
+@router.post("/debug-extract/{book_id}", status_code=202)
+async def debug_extract_endpoint(
+    request: Request,
+    book_id: str, 
+    background_tasks: BackgroundTasks
+):
+    """
+    Debug endpoint to verify API routing is working
+    """
+    try:
+        # Log request information
+        logger.info(f"Debug extract endpoint called for book_id={book_id}")
+        logger.info(f"Request method: {request.method}")
+        logger.info(f"Request URL: {request.url}")
+        logger.info(f"Request headers: {dict(request.headers)}")
+        
+        # Try to parse body if any
+        try:
+            body = await request.json()
+            logger.info(f"Request body: {body}")
+        except Exception as e:
+            logger.info(f"No JSON body or error parsing: {e}")
+        
+        # Return a simple JSON response to confirm API is working
+        return JSONResponse(
+            status_code=202,
+            content={
+                "status": "success",
+                "message": "Debug API endpoint is working",
+                "book_id": book_id,
+                "api_routing": "confirmed_working",
+                "timestamp": str(datetime.datetime.now())
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error in debug endpoint: {str(e)}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error", 
+                "message": f"Server error in debug endpoint: {str(e)}"
             }
         )

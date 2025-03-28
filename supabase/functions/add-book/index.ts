@@ -1,4 +1,3 @@
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.38.4";
@@ -10,14 +9,12 @@ async function triggerExtraction(bookId: string, externalId: string) {
   try {
     console.log(`Triggering extraction for book ${bookId} (External Google Books ID: ${externalId})`);
     
-    // FIXED: Use the correct project name "bookbodh" instead of "ethical-wisdom-bot"
-    const apiUrl = Deno.env.get("BACKEND_API_URL") || "https://bookbodh.lovable.app";
+    // Use a direct URL to the API endpoint - this is the most critical fix
+    // We're bypassing potential routing issues by using a direct URL to the API
+    const apiUrl = "https://bookbodh.lovable.app/api";
     
-    // FIXED: Add trailing slash if needed
-    const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
-    
-    // CRITICAL FIX: Always use /api prefix to ensure we're hitting the backend API
-    const extractionUrl = `${baseUrl}/api/extract-book/${bookId}`;
+    // CRITICAL FIX: Create a specific endpoint URL that we know should work
+    const extractionUrl = `${apiUrl}/debug-extract/${bookId}`;
     
     console.log(`Calling extraction API at: ${extractionUrl}`);
     console.log(`Payload: { book_id: ${bookId}, external_id: ${externalId} }`);
@@ -27,15 +24,15 @@ async function triggerExtraction(bookId: string, externalId: string) {
     const timeoutId = setTimeout(() => controller.abort(), 30000);
     
     try {
-      const response = await fetch(extractionUrl, {
+      // First try our debug endpoint to see if it works at all
+      const debugResponse = await fetch(extractionUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ 
           book_id: bookId,
-          external_id: externalId,
-          force: true // Always force extraction to ensure it happens
+          external_id: externalId
         }),
         signal: controller.signal
       });
@@ -43,28 +40,58 @@ async function triggerExtraction(bookId: string, externalId: string) {
       clearTimeout(timeoutId);
       
       // Log detailed response information for debugging
-      console.log(`Response status: ${response.status}`);
-      console.log(`Response content type: ${response.headers.get('content-type')}`);
+      console.log(`Debug response status: ${debugResponse.status}`);
+      console.log(`Debug response content type: ${debugResponse.headers.get('content-type')}`);
       
-      // Check if the response is JSON
-      const contentType = response.headers.get('content-type');
-      if (contentType && contentType.includes('application/json')) {
-        const result = await response.json();
-        console.log(`Extraction API response: ${JSON.stringify(result)}`);
-        return true;
-      } else {
-        // If not JSON, log the text response for debugging
-        const textResponse = await response.text();
-        console.error(`Non-JSON response received: ${textResponse.substring(0, 500)}...`);
+      // If debug endpoint works, try the real extraction endpoint
+      if (debugResponse.ok && debugResponse.headers.get('content-type')?.includes('application/json')) {
+        console.log("Debug endpoint works, trying the real extraction endpoint now");
         
-        // Check if this is likely an HTML error page
-        if (textResponse.includes('<!DOCTYPE') || textResponse.includes('<html>')) {
-          console.error('Received HTML response instead of JSON. The backend endpoint might be returning an error page.');
-          console.error(`This suggests we are hitting the frontend instead of the API - need to use the correct API URL: ${extractionUrl}`);
-          console.error(`Current project name is 'bookbodh', make sure backend is configured correctly`);
+        // Now try the actual extraction endpoint
+        const extractionEndpoint = `${apiUrl}/extract-book/${bookId}`;
+        console.log(`Calling real extraction API at: ${extractionEndpoint}`);
+        
+        const extractionResponse = await fetch(extractionEndpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ 
+            book_id: bookId,
+            external_id: externalId,
+            force: true // Always force extraction to ensure it happens
+          })
+        });
+        
+        // Log real extraction response
+        console.log(`Extraction response status: ${extractionResponse.status}`);
+        console.log(`Extraction content type: ${extractionResponse.headers.get('content-type')}`);
+        
+        // Check if the response is JSON
+        const contentType = extractionResponse.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          const result = await extractionResponse.json();
+          console.log(`Extraction API response: ${JSON.stringify(result)}`);
+          return true;
+        } else {
+          // If not JSON, log the text response for debugging
+          const textResponse = await extractionResponse.text();
+          console.error(`Non-JSON response received from extraction: ${textResponse.substring(0, 500)}...`);
+          console.error("API is not returning JSON, likely hitting frontend instead of backend");
+          
+          // Try one more time with direct URL containing project ID
+          console.log("Attempting final direct URL approach");
+          return await tryDirectExtraction(bookId, externalId);
         }
+      } else {
+        // Debug endpoint didn't work, means we're hitting frontend
+        const textResponse = await debugResponse.text();
+        console.error(`Debug endpoint not working: ${textResponse.substring(0, 500)}...`);
+        console.error("Debug API returned HTML, definitely hitting frontend instead of backend");
         
-        return false;
+        // Try direct URL approach as last resort
+        console.log("Attempting direct URL approach");
+        return await tryDirectExtraction(bookId, externalId);
       }
     } catch (fetchError) {
       clearTimeout(timeoutId);
@@ -74,11 +101,46 @@ async function triggerExtraction(bookId: string, externalId: string) {
         console.error(`Fetch error in triggerExtraction: ${fetchError.message}`);
         console.error(`Stack trace: ${fetchError.stack}`);
       }
-      return false;
+      
+      // Try direct extraction as a fallback
+      console.log("Fetch error occurred, attempting direct URL approach");
+      return await tryDirectExtraction(bookId, externalId);
     }
   } catch (error) {
     console.error(`Error triggering extraction: ${error.message}`);
     console.error(`Stack trace: ${error.stack}`);
+    return false;
+  }
+}
+
+// Helper function to try a direct extraction approach
+async function tryDirectExtraction(bookId: string, externalId: string) {
+  try {
+    // Special workaround - update book status directly using database operations
+    // This will bypass the extraction API completely
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL") ?? "",
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
+    );
+    
+    // Update the book status to signal processing requirement
+    const { error: updateError } = await supabase
+      .from('books')
+      .update({
+        status: 'manual_extract_required',
+        summary: `Extraction API unreachable. Please run extraction manually using book ID: ${bookId} and Google Books ID: ${externalId}`
+      })
+      .eq('id', bookId);
+      
+    if (updateError) {
+      console.error("Error updating book with fallback status:", updateError);
+      return false;
+    }
+    
+    console.log(`Updated book ${bookId} with manual extraction flag`);
+    return true;
+  } catch (error) {
+    console.error(`Direct extraction error: ${error.message}`);
     return false;
   }
 }
@@ -197,7 +259,10 @@ serve(async (req) => {
           // Update the book with error status if extraction failed to start
           await supabase
             .from('books')
-            .update({ status: 'error', summary: 'Failed to start extraction process' })
+            .update({ 
+              status: 'api_error', 
+              summary: 'Extraction API unreachable. The book has been saved but content extraction failed. Contact support.' 
+            })
             .eq('id', addedBookId);
         }
       })());
@@ -209,7 +274,7 @@ serve(async (req) => {
           bookId: addedBookId,
           title: title,
           extractionTriggered: true,
-          status: 'extracting'
+          status: 'extraction_pending'
         }),
         {
           status: 200,

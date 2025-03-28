@@ -31,11 +31,11 @@ app.add_middleware(
 )
 
 # Include routers
-# Mount API routes under /api prefix to avoid conflicts with frontend routing
+# First include at API prefix level (this should take precedence)
 app.include_router(books.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
 
-# Also include routers at root level for backward compatibility
+# Also include at root level for backward compatibility
 app.include_router(books.router)
 app.include_router(chat.router)
 
@@ -170,6 +170,17 @@ async def api_health_check():
             "status": "unhealthy",
             "message": f"API health check failed: {str(e)}"
         }
+
+@app.get("/api/test")
+async def api_test():
+    """
+    Simple endpoint to test API routing
+    """
+    return {
+        "status": "success",
+        "message": "API endpoint is working correctly",
+        "service": "BookBodh API"
+    }
 
 @app.get("/api-routes")
 async def list_api_routes():
@@ -406,3 +417,16 @@ async def list_books():
             "error": str(e),
             "traceback": traceback.format_exc()
         }
+
+@app.post("/api/debug-extract/{book_id}")
+async def debug_extract_book(book_id: str):
+    """
+    Debug endpoint for book extraction
+    """
+    logger.info(f"Debug extraction endpoint called for book_id={book_id}")
+    
+    return {
+        "status": "received",
+        "book_id": book_id,
+        "message": "Debug extraction request received"
+    }
