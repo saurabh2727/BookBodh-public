@@ -3,6 +3,7 @@ import requests
 import json
 import logging
 import html
+import re
 from typing import Dict, List, Optional, Tuple
 from app.config.settings import settings
 
@@ -37,6 +38,34 @@ def sanitize_html(text: str) -> str:
     
     return result
 
+def extract_book_preview_url(text: str) -> Optional[str]:
+    """
+    Extract Google Books preview URL from text if present
+    
+    Args:
+        text: Text that may contain a Google Books URL
+        
+    Returns:
+        Extracted URL or None if not found
+    """
+    # Look for Google Books preview URL patterns
+    book_preview_regex = r'https://www\.google\.com/books/edition/_/([a-zA-Z0-9_-]+)\?hl=en&gbpv=1'
+    book_embed_regex = r'https://books\.google\.[a-z.]+/books\?id=([a-zA-Z0-9_-]+)&lpg=.+&pg=.+&output=embed'
+    
+    # Check for preview URL
+    preview_match = re.search(book_preview_regex, text)
+    if preview_match:
+        book_id = preview_match.group(1)
+        # Create a better embed URL for the iframe
+        return f"https://books.google.com/books?id={book_id}&lpg=PP1&pg=PP1&output=embed"
+    
+    # Check for embed URL
+    embed_match = re.search(book_embed_regex, text)
+    if embed_match:
+        return embed_match.group(0)
+    
+    return None
+
 def generate_response(query: str, chunks: List[Dict]) -> Dict:
     """
     Generate a response using the Grok API based on the query and retrieved chunks
@@ -51,6 +80,7 @@ def generate_response(query: str, chunks: List[Dict]) -> Dict:
     # Format chunks for context
     context = ""
     book_citations = {}
+    preview_urls = []
     
     # Log input data
     logger.info(f"Generating response for query: '{query}'")
@@ -61,6 +91,11 @@ def generate_response(query: str, chunks: List[Dict]) -> Dict:
         clean_text = sanitize_html(chunk['text']) if 'text' in chunk else ""
         context += f"\nChunk {i+1} from '{chunk['title']}' by {chunk['author']}:\n{clean_text}\n"
         book_citations[chunk['title']] = chunk['author']
+        
+        # Check if this chunk contains a book preview URL
+        preview_url = extract_book_preview_url(clean_text)
+        if preview_url and preview_url not in preview_urls:
+            preview_urls.append(preview_url)
     
     # Create prompt for Grok
     prompt = f"""Answer the query: '{query}' using this context: 
@@ -108,6 +143,10 @@ DO NOT include HTML tags in your response."""
         
         # Ensure the response is clean of HTML
         response_text = sanitize_html(response_text)
+        
+        # Add book preview URL to the response if available
+        if preview_urls and len(preview_urls) > 0:
+            response_text += f"\n\nYou can preview this book at: {preview_urls[0]}"
         
         logger.info(f"Generated response with content length: {len(response_text)}")
         

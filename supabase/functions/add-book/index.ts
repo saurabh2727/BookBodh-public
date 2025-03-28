@@ -10,7 +10,7 @@ async function extractFromGoogleBooks(bookId: string, externalId: string) {
     console.log(`Attempting to extract content for book ${bookId} using Google Books API ID: ${externalId}`);
     
     // Call Google Books API to get book details
-    const googleBooksUrl = `https://www.googleapis.com/books/v1/volumes/${externalId}?fields=volumeInfo(title,authors,description,previewLink,infoLink,subtitle),searchInfo,accessInfo`;
+    const googleBooksUrl = `https://www.googleapis.com/books/v1/volumes/${externalId}?fields=volumeInfo(title,authors,description,previewLink,infoLink,subtitle,pageCount),searchInfo,accessInfo(viewability,textToSpeechPermission,pdf,epub,webReaderLink,publicDomain)`;
     console.log(`Calling Google Books API: ${googleBooksUrl}`);
     
     const response = await fetch(googleBooksUrl);
@@ -27,11 +27,11 @@ async function extractFromGoogleBooks(bookId: string, externalId: string) {
     
     if (bookData.volumeInfo?.description) {
       summary = bookData.volumeInfo.description;
-      content += summary + "\n\n";
+      content += "Book Description: " + summary + "\n\n";
     }
     
     if (bookData.searchInfo?.textSnippet) {
-      content += bookData.searchInfo.textSnippet + "\n\n";
+      content += "Preview Snippet: " + bookData.searchInfo.textSnippet + "\n\n";
     }
     
     // Get any available text snippets from the volume info
@@ -43,19 +43,52 @@ async function extractFromGoogleBooks(bookId: string, externalId: string) {
       content += "Subtitle: " + bookData.volumeInfo.subtitle + "\n\n";
     }
     
+    // Add page count information if available
+    if (bookData.volumeInfo?.pageCount) {
+      content += `Page Count: ${bookData.volumeInfo.pageCount}\n\n`;
+    }
+    
     // Additional attempt to extract from Google Books Viewer if available
     let previewAvailable = false;
     let previewUrl = "";
+    let webReaderLink = "";
     
-    if (bookData.accessInfo?.viewability === "PARTIAL" || bookData.accessInfo?.viewability === "ALL_PAGES") {
-      previewAvailable = true;
-      previewUrl = `https://www.google.com/books/edition/_/${externalId}?hl=en&gbpv=1`;
-      console.log(`Preview is available for this book at: ${previewUrl}`);
-      
-      // Add preview URL to the content for reference
-      content += `\nA preview of this book is available at: ${previewUrl}\n\n`;
+    if (bookData.accessInfo) {
+      // Check if preview is available
+      if (bookData.accessInfo.viewability === "PARTIAL" || bookData.accessInfo.viewability === "ALL_PAGES") {
+        previewAvailable = true;
+        
+        // Get webReaderLink if available (better for iframe embedding)
+        if (bookData.accessInfo.webReaderLink) {
+          webReaderLink = bookData.accessInfo.webReaderLink;
+        }
+        
+        // Get Google Books preview URL using the enhanced format
+        previewUrl = `https://www.google.com/books/edition/_/${externalId}?hl=en&gbpv=1`;
+        
+        console.log(`Preview is available for this book at: ${previewUrl}`);
+        console.log(`Web reader link: ${webReaderLink}`);
+        
+        // Add preview URL to the content for reference
+        content += `\nA preview of this book is available at: ${previewUrl}\n\n`;
+        
+        // Additional format for embedding
+        content += `\nEmbed link: ${webReaderLink || previewUrl}\n\n`;
+        
+        // Try to get more details about available formats
+        if (bookData.accessInfo.pdf?.isAvailable) {
+          content += "PDF version is available.\n";
+        }
+        
+        if (bookData.accessInfo.epub?.isAvailable) {
+          content += "EPUB version is available.\n";
+        }
+      } else {
+        console.log("No preview available for this book. Viewability: " + bookData.accessInfo.viewability);
+        content += "\nNo full preview available for this book. Limited content only.\n";
+      }
     } else {
-      console.log("No preview available for this book");
+      console.log("No accessInfo available in the Google Books API response");
     }
     
     const supabase = createClient(
@@ -63,6 +96,7 @@ async function extractFromGoogleBooks(bookId: string, externalId: string) {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
     );
     
+    // Generate sample chunks even if we don't have full content, to ensure users get some response
     // Check if we got meaningful content
     if (content.trim().length > 0) {
       console.log(`Successfully extracted ${content.length} characters of content`);
@@ -74,7 +108,9 @@ async function extractFromGoogleBooks(bookId: string, externalId: string) {
       };
       
       if (previewAvailable) {
+        // Store both URLs to give options for display
         updateData.file_url = previewUrl;
+        updateData.embed_url = webReaderLink || previewUrl;
       }
       
       const { error: updateError } = await supabase
@@ -105,6 +141,21 @@ async function extractFromGoogleBooks(bookId: string, externalId: string) {
         });
       }
       
+      // Add embedded preview URL as a special chunk if available
+      if (previewAvailable && (webReaderLink || previewUrl)) {
+        chunks.push({
+          book_id: bookId,
+          chunk_index: chunks.length,
+          text: `This book has a preview available. You can view it at: ${previewUrl}`,
+          title: bookData.volumeInfo?.title || "Unknown",
+          author: (bookData.volumeInfo?.authors && bookData.volumeInfo.authors.length > 0) 
+            ? bookData.volumeInfo.authors.join(", ") 
+            : "Unknown",
+          summary: "Preview information for the book",
+          is_preview_info: true
+        });
+      }
+      
       if (chunks.length > 0) {
         console.log(`Creating ${chunks.length} content chunks for book ${bookId}`);
         
@@ -132,7 +183,8 @@ async function extractFromGoogleBooks(bookId: string, externalId: string) {
         success: true, 
         chunksCount: chunks.length,
         previewAvailable: previewAvailable,
-        previewUrl: previewAvailable ? previewUrl : null 
+        previewUrl: previewAvailable ? previewUrl : null,
+        webReaderLink: previewAvailable ? webReaderLink : null
       };
     } else {
       console.log("No content available from Google Books API");

@@ -1,3 +1,4 @@
+
 export type MessageType = 'user' | 'bot';
 
 export interface Citation {
@@ -18,6 +19,7 @@ export interface ChatMessage {
   isExtractionStatus?: boolean;
   isExtractionComplete?: boolean;
   isExtractionError?: boolean;
+  embedUrl?: string;
 }
 
 export interface Book {
@@ -29,6 +31,7 @@ export interface Book {
   coverColor: string;
   imageUrl?: string;
   fileUrl?: string;
+  embedUrl?: string;
   chunksCount?: number;
 }
 
@@ -45,6 +48,7 @@ export interface ChatRequest {
     author: string;
     text: string;
     summary?: string;
+    is_preview_info?: boolean;
   }>;
 }
 
@@ -56,6 +60,7 @@ export interface ChatResponse {
   status?: string;
   bookId?: string;
   chunksCount?: number;
+  embedUrl?: string;
 }
 
 export interface BookChunk {
@@ -66,6 +71,7 @@ export interface BookChunk {
   text: string;
   summary?: string;
   created_at: string;
+  is_preview_info?: boolean;
 }
 
 export interface ExtractionStatus {

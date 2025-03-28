@@ -4,7 +4,7 @@ import { ChatMessage as ChatMessageType } from '@/types';
 import { cn } from '@/lib/utils';
 import { Card, CardContent } from '@/components/ui/card';
 import BookCitation from './BookCitation';
-import { User, Bot } from 'lucide-react';
+import { User, Bot, BookOpen } from 'lucide-react';
 
 interface ChatMessageProps {
   message: ChatMessageType;
@@ -37,19 +37,65 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
   const createMarkup = (content: string) => {
     if (!content) return { __html: "" };
     
-    // Check if content has HTML tags and remove them if present
-    const hasHtmlTags = /<[a-z][\s\S]*>/i.test(content);
+    // Check if content has an embedded book link
+    const bookPreviewRegex = /https:\/\/www\.google\.com\/books\/edition\/_\/[a-zA-Z0-9_-]+\?hl=en&gbpv=1/g;
+    const bookEmbedRegex = /https:\/\/books\.google\.[a-z.]+\/books\?id=[a-zA-Z0-9_-]+&lpg=.+&pg=.+&output=embed/g;
     
+    // Check if content contains a Google Books URL but is not entirely a URL
+    const hasBookPreview = bookPreviewRegex.test(content) || bookEmbedRegex.test(content);
+    
+    // Extract clean text content
+    let cleanText = content;
+    
+    // Check for HTML tags and remove them if present
+    const hasHtmlTags = /<[a-z][\s\S]*>/i.test(cleanText);
     if (hasHtmlTags) {
-      // Get plain text by removing HTML tags
-      const cleanText = content.replace(/<\/?[^>]+(>|$)/g, "");
-      // Preserve line breaks
-      return { __html: cleanText.replace(/\n/g, '<br />') };
-    } else {
-      // For plain text, just preserve line breaks
-      return { __html: content.replace(/\n/g, '<br />') };
+      cleanText = cleanText.replace(/<\/?[^>]+(>|$)/g, "");
     }
+    
+    // Preserve line breaks
+    cleanText = cleanText.replace(/\n/g, '<br />');
+    
+    return { __html: cleanText };
   };
+
+  // Check if message contains a book preview URL
+  const containsBookPreview = () => {
+    if (!message.content) return false;
+    
+    const bookPreviewRegex = /https:\/\/www\.google\.com\/books\/edition\/_\/[a-zA-Z0-9_-]+\?hl=en&gbpv=1/g;
+    const bookEmbedRegex = /https:\/\/books\.google\.[a-z.]+\/books\?id=[a-zA-Z0-9_-]+&lpg=.+&pg=.+&output=embed/g;
+    
+    return bookPreviewRegex.test(message.content) || bookEmbedRegex.test(message.content);
+  };
+
+  // Extract book preview URL if present
+  const getBookPreviewUrl = () => {
+    if (!message.content) return null;
+    
+    // Look for Google Books preview URL patterns
+    const bookPreviewRegex = /https:\/\/www\.google\.com\/books\/edition\/_\/([a-zA-Z0-9_-]+)\?hl=en&gbpv=1/;
+    const bookEmbedRegex = /https:\/\/books\.google\.[a-z.]+\/books\?id=([a-zA-Z0-9_-]+)&lpg=.+&pg=.+&output=embed/;
+    
+    // Check for preview URL
+    const previewMatch = message.content.match(bookPreviewRegex);
+    if (previewMatch) {
+      const bookId = previewMatch[1];
+      // Create a better embed URL for the iframe
+      return `https://books.google.com/books?id=${bookId}&lpg=PP1&pg=PP1&output=embed`;
+    }
+    
+    // Check for embed URL
+    const embedMatch = message.content.match(bookEmbedRegex);
+    if (embedMatch) {
+      return message.content.match(bookEmbedRegex)?.[0] || null;
+    }
+    
+    return null;
+  };
+
+  const bookPreviewUrl = getBookPreviewUrl();
+  const hasBookPreview = containsBookPreview();
 
   return (
     <div 
@@ -76,6 +122,22 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
               className="text-sm prose dark:prose-invert max-w-none" 
               dangerouslySetInnerHTML={createMarkup(message.content)}
             />
+            
+            {/* Render Google Books Preview if available */}
+            {!isUser && hasBookPreview && bookPreviewUrl && (
+              <div className="mt-4 border border-border rounded-md overflow-hidden">
+                <div className="bg-muted px-3 py-1 text-xs flex items-center gap-1">
+                  <BookOpen className="h-3 w-3" />
+                  <span>Book Preview</span>
+                </div>
+                <iframe 
+                  src={bookPreviewUrl}
+                  className="w-full aspect-[4/3] border-0"
+                  allow="encrypted-media"
+                  allowFullScreen
+                ></iframe>
+              </div>
+            )}
           </CardContent>
         </Card>
         
