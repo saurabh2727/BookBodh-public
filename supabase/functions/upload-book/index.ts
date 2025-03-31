@@ -434,7 +434,9 @@ async function triggerExtraction(bookId: string) {
     
     // Get the backend API URL from environment or use default
     const apiUrl = Deno.env.get("BACKEND_API_URL") || "https://ethical-wisdom-bot.lovable.app";
-    const extractionUrl = `${apiUrl}/books/extract-book/${bookId}`;
+    
+    // Try first with /api prefix (preferred API path format)
+    const extractionUrl = `${apiUrl}/api/books/extract-book/${bookId}`;
     
     console.log(`Calling extraction endpoint: ${extractionUrl}`);
     
@@ -442,34 +444,89 @@ async function triggerExtraction(bookId: string) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "Accept": "application/json, text/plain, */*"
       },
       body: JSON.stringify({ book_id: bookId }),
     });
     
-    // Check if the response is ok based on status code, not expecting JSON
+    // Log detailed response info for debugging
+    console.log(`Backend response status: ${response.status}`);
+    console.log(`Backend response content-type: ${response.headers.get("content-type")}`);
+    
+    let success = false;
+    
+    // Check if the response is ok based on status code
     if (response.status >= 200 && response.status < 300) {
-      // Check if the response is JSON before trying to parse it
-      const contentType = response.headers.get("content-type");
-      if (contentType && contentType.includes("application/json")) {
+      // Get the raw response text first
+      const responseText = await response.text();
+      console.log(`Raw response (first 200 chars): ${responseText.substring(0, 200)}...`);
+      
+      // Try to parse as JSON if it looks like JSON
+      if (responseText.trim().startsWith('{') || responseText.trim().startsWith('[')) {
         try {
-          const result = await response.json();
+          const result = JSON.parse(responseText);
           console.log(`Extraction initiated successfully for book ${bookId}`, result);
         } catch (jsonError) {
-          // If JSON parsing fails, still consider it a success but log the raw response
-          console.log(`Extraction likely initiated for book ${bookId}. Raw response:`, await response.text());
+          console.log(`Response looks like JSON but couldn't be parsed, treating as success anyway`);
         }
       } else {
-        // Not JSON but successful status code
-        console.log(`Extraction initiated for book ${bookId}. Non-JSON response:`, await response.text());
+        console.log(`Extraction initiated with non-JSON response`);
       }
-      return true;
+      
+      success = true;
     } else {
-      // Error status code
-      const errorText = await response.text();
-      console.error(`Failed to initiate extraction for book ${bookId}: Status ${response.status}`, 
-        errorText.length > 500 ? errorText.substring(0, 500) + "..." : errorText);
-      return false;
+      // Error status code from first attempt, try alternative path without /api prefix
+      console.log("First attempt failed, trying alternative API path...");
+      const alternativeUrl = `${apiUrl}/books/extract-book/${bookId}`;
+      console.log(`Calling alternative endpoint: ${alternativeUrl}`);
+      
+      const alternativeResponse = await fetch(alternativeUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json, text/plain, */*"
+        },
+        body: JSON.stringify({ book_id: bookId }),
+      });
+      
+      if (alternativeResponse.status >= 200 && alternativeResponse.status < 300) {
+        console.log(`Alternative endpoint succeeded with status: ${alternativeResponse.status}`);
+        const altText = await alternativeResponse.text();
+        console.log(`Alternative response (first 200 chars): ${altText.substring(0, 200)}...`);
+        success = true;
+      } else {
+        // Both attempts failed
+        const errorText = await alternativeResponse.text();
+        console.error(`Both API endpoints failed. Status: ${alternativeResponse.status}`, 
+          errorText.length > 500 ? errorText.substring(0, 500) + "..." : errorText);
+        
+        // Try one more fallback with direct debug endpoint
+        const debugUrl = `${apiUrl}/api/debug-extract/${bookId}`;
+        console.log(`Trying debug endpoint as last resort: ${debugUrl}`);
+        
+        try {
+          const debugResponse = await fetch(debugUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Accept": "application/json, text/plain, */*"
+            },
+            body: JSON.stringify({ book_id: bookId }),
+          });
+          
+          if (debugResponse.status >= 200 && debugResponse.status < 300) {
+            console.log(`Debug endpoint succeeded with status: ${debugResponse.status}`);
+            success = true;
+          } else {
+            console.error(`All extraction attempts failed for book ${bookId}`);
+          }
+        } catch (debugError) {
+          console.error(`Error with debug endpoint: ${debugError.message}`);
+        }
+      }
     }
+    
+    return success;
   } catch (error) {
     console.error(`Error triggering extraction: ${error.message}`);
     return false;

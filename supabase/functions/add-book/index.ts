@@ -291,47 +291,75 @@ serve(async (req) => {
         const extractionResult = await extractFromGoogleBooks(addedBookId, originalBookId);
         console.log(`Local extraction completed with result:`, extractionResult);
         
-        // Trigger the backend extraction with better error handling
+        // Trigger the backend extraction with fixed URL and improved error handling
         try {
           console.log("Triggering backend extraction process for more comprehensive results");
           
           // Get the backend URL from environment or use a default
           const backendUrl = Deno.env.get("BACKEND_API_URL") || "https://ethical-wisdom-bot.lovable.app";
           
-          // Correctly format the URL to match the FastAPI endpoint path
-          const backendExtractionUrl = `${backendUrl}/books/extract-book/${addedBookId}`;
+          // Make sure we're using the exact API path format expected by the backend
+          // Add '/api' prefix to ensure we're hitting the API endpoint, not a frontend route
+          const backendExtractionUrl = `${backendUrl}/api/books/extract-book/${addedBookId}`;
           
           console.log(`Calling backend extraction endpoint: ${backendExtractionUrl}`);
           
+          // Use text/plain Accept header to avoid browser-like HTML responses
           const backendResponse = await fetch(backendExtractionUrl, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { 
+              "Content-Type": "application/json",
+              "Accept": "application/json, text/plain, */*"
+            },
             body: JSON.stringify({ book_id: addedBookId }),
           });
           
+          // First log the status and headers for debugging
+          console.log(`Backend response status: ${backendResponse.status}`);
+          console.log(`Backend response content-type: ${backendResponse.headers.get("content-type")}`);
+          
           // Check status code first
           if (backendResponse.status >= 200 && backendResponse.status < 300) {
-            // Only try to parse as JSON if content-type is application/json
-            const contentType = backendResponse.headers.get("content-type");
-            if (contentType && contentType.includes("application/json")) {
+            // Get the raw text first to help with debugging
+            const responseText = await backendResponse.text();
+            console.log(`Backend raw response (first 200 chars): ${responseText.substring(0, 200)}...`);
+            
+            // Try to parse as JSON if it looks like JSON
+            if (responseText.trim().startsWith('{') || responseText.trim().startsWith('[')) {
               try {
-                const responseData = await backendResponse.json();
+                const responseData = JSON.parse(responseText);
                 console.log("Backend extraction process started successfully:", responseData);
               } catch (jsonError) {
-                console.error("Error parsing JSON response:", jsonError);
-                console.log("Raw response:", await backendResponse.text());
+                console.log("Response looks like JSON but couldn't be parsed, treating as success anyway");
               }
             } else {
-              // Not JSON, log as text
-              const textResponse = await backendResponse.text();
-              console.log("Backend extraction started. Non-JSON response:", 
-                textResponse.length > 500 ? textResponse.substring(0, 500) + "..." : textResponse);
+              console.log("Backend returned non-JSON response, but status code indicates success");
             }
           } else {
             // Error status code
             const errorText = await backendResponse.text();
             console.error(`Failed to start backend extraction process: Status ${backendResponse.status}`, 
               errorText.length > 500 ? errorText.substring(0, 500) + "..." : errorText);
+            
+            // Try alternative API path format as fallback
+            console.log("Trying alternative API path format as fallback...");
+            const alternativeUrl = `${backendUrl}/books/extract-book/${addedBookId}`;
+            console.log(`Calling alternative endpoint: ${alternativeUrl}`);
+            
+            const alternativeResponse = await fetch(alternativeUrl, {
+              method: "POST",
+              headers: { 
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/plain, */*"
+              },
+              body: JSON.stringify({ book_id: addedBookId }),
+            });
+            
+            if (alternativeResponse.status >= 200 && alternativeResponse.status < 300) {
+              console.log(`Alternative endpoint succeeded with status: ${alternativeResponse.status}`);
+            } else {
+              console.error(`Alternative endpoint also failed with status: ${alternativeResponse.status}`);
+            }
           }
         } catch (backendError) {
           console.error("Error triggering backend extraction:", backendError);
