@@ -1,3 +1,4 @@
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.38.4";
@@ -291,12 +292,30 @@ serve(async (req) => {
         const extractionResult = await extractFromGoogleBooks(addedBookId, originalBookId);
         console.log(`Local extraction completed with result:`, extractionResult);
         
-        // Trigger the backend extraction with fixed URL and improved debugging
+        // Trigger the backend extraction with improved URL patterns and port variations
         try {
           console.log("Triggering backend extraction process for more comprehensive results");
           
-          // Get the backend URL from environment or use a default
-          const backendUrl = Deno.env.get("BACKEND_API_URL") || "https://ethical-wisdom-bot.lovable.app";
+          // Get the backend base URLs to try (with different domain patterns and ports)
+          const backendBaseUrls = [
+            // Standard URL
+            Deno.env.get("BACKEND_API_URL") || "https://ethical-wisdom-bot.lovable.app",
+            
+            // Try specific API subdomains
+            "https://api.ethical-wisdom-bot.lovable.app",
+            "https://backend.ethical-wisdom-bot.lovable.app",
+            
+            // Try with different ports (port 8000 is common for FastAPI)
+            "https://ethical-wisdom-bot.lovable.app:8000",
+            "https://ethical-wisdom-bot.lovable.app:8080",
+            
+            // Try with different scheme (http instead of https)
+            "http://ethical-wisdom-bot.lovable.app",
+            
+            // Fallback to lovable.app domain if specified domain doesn't work
+            "https://ethical-wisdom-bot-api.lovable.app",
+            "https://bookbodh-api.lovable.app"
+          ];
           
           // Try multiple API path formats to increase chances of success
           const apiPaths = [
@@ -304,85 +323,94 @@ serve(async (req) => {
             `/books/extract-book/${addedBookId}`,
             `/api/extract-book/${addedBookId}`,
             `/extract-book/${addedBookId}`,
-            `/api/debug-extract/${addedBookId}`  // New debug endpoint
+            `/api/debug-extract/${addedBookId}`,  // Debug endpoint
+            `/backend/api/books/extract-book/${addedBookId}`  // Try with /backend prefix
           ];
           
           let extractionSuccess = false;
           let extractionError = null;
           let responseData = null;
           
-          // Try each API path format until one succeeds
-          for (const apiPath of apiPaths) {
+          // Try each base URL with each API path until one succeeds
+          for (const baseUrl of backendBaseUrls) {
             if (extractionSuccess) break;
             
-            const backendExtractionUrl = `${backendUrl}${apiPath}`;
-            console.log(`Trying backend extraction endpoint: ${backendExtractionUrl}`);
-            
-            try {
-              // Enhanced request with proper headers
-              const backendResponse = await fetch(backendExtractionUrl, {
-                method: "POST",
-                headers: { 
-                  "Content-Type": "application/json",
-                  "Accept": "application/json",
-                  "User-Agent": "Supabase Edge Function/1.0",
-                  "X-Request-Source": "edge-function"
-                },
-                body: JSON.stringify({ 
-                  book_id: addedBookId,
-                  external_id: originalBookId,
-                  force: true
-                }),
-              });
+            for (const apiPath of apiPaths) {
+              if (extractionSuccess) break;
               
-              // Log complete response details for debugging
-              console.log(`Backend response status: ${backendResponse.status}`);
-              const contentType = backendResponse.headers.get("content-type");
-              console.log(`Backend response content-type: ${contentType}`);
+              const backendExtractionUrl = `${baseUrl}${apiPath}`;
+              console.log(`Trying backend extraction endpoint: ${backendExtractionUrl}`);
               
-              // Get the full response text
-              const responseText = await backendResponse.text();
-              console.log(`Backend full response length: ${responseText.length} chars`);
-              console.log(`Backend response preview: ${responseText.substring(0, 500)}...`);
-              
-              // Check if status is success (2xx) AND the content-type is JSON
-              if (backendResponse.status >= 200 && backendResponse.status < 300 && 
-                  contentType && contentType.includes("application/json")) {
-                try {
-                  responseData = JSON.parse(responseText);
-                  console.log("Backend extraction JSON response:", responseData);
-                  extractionSuccess = true;
-                } catch (jsonError) {
-                  console.error(`Error parsing JSON response: ${jsonError.message}`);
-                  console.error(`Response was: ${responseText.substring(0, 500)}...`);
-                  extractionError = `JSON parsing error: ${jsonError.message}`;
+              try {
+                // Enhanced request with proper headers to help routing
+                const backendResponse = await fetch(backendExtractionUrl, {
+                  method: "POST",
+                  headers: { 
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "User-Agent": "Supabase Edge Function/1.0",
+                    "X-Request-Source": "edge-function",
+                    "X-API-Request": "true",  // Custom header to help identify API requests
+                    "X-Backend-Request": "true"  // Another custom header
+                  },
+                  body: JSON.stringify({ 
+                    book_id: addedBookId,
+                    external_id: originalBookId,
+                    force: true
+                  }),
+                });
+                
+                // Log complete response details for debugging
+                console.log(`Backend response status: ${backendResponse.status}`);
+                const contentType = backendResponse.headers.get("content-type");
+                console.log(`Backend response content-type: ${contentType}`);
+                
+                // Get the full response text
+                const responseText = await backendResponse.text();
+                console.log(`Backend full response length: ${responseText.length} chars`);
+                console.log(`Backend response preview: ${responseText.substring(0, 500)}...`);
+                
+                // Check if status is success (2xx) AND the content-type is JSON
+                if (backendResponse.status >= 200 && backendResponse.status < 300 && 
+                    contentType && contentType.includes("application/json")) {
+                  try {
+                    responseData = JSON.parse(responseText);
+                    console.log("Backend extraction JSON response:", responseData);
+                    extractionSuccess = true;
+                    
+                    // Exit both loops on success
+                    break;
+                  } catch (jsonError) {
+                    console.error(`Error parsing JSON response: ${jsonError.message}`);
+                    console.error(`Response was: ${responseText.substring(0, 500)}...`);
+                    extractionError = `JSON parsing error: ${jsonError.message}`;
+                  }
+                } else if (backendResponse.status >= 200 && backendResponse.status < 300) {
+                  // HTML response with success status - this is NOT considered a success anymore
+                  console.error(`Expected JSON but got ${contentType || "unknown content type"}`);
+                  console.error(`HTML response with success status code. The extraction process may not be working correctly.`);
+                  console.error(`First 500 chars: ${responseText.substring(0, 500)}...`);
+                  
+                  // If we get HTML, store this error but continue trying other endpoints
+                  extractionError = `Backend returned non-JSON response with success status code. Expected application/json.`;
+                  
+                  // Check if the response is clearly HTML
+                  if (responseText.includes("<!DOCTYPE html>") || responseText.includes("<html")) {
+                    console.log("Detected HTML response, continuing to try other endpoints");
+                    // Continue to next endpoint - don't consider this a success
+                    continue;
+                  }
+                } else {
+                  // Error response
+                  console.error(`Failed with endpoint ${apiPath}: Status ${backendResponse.status}`);
+                  console.error(`Error response: ${responseText.substring(0, 500)}...`);
+                  extractionError = `Status ${backendResponse.status} with ${apiPath}`;
                 }
-              } else if (backendResponse.status >= 200 && backendResponse.status < 300) {
-                // HTML response with success status - this is NOT considered a success anymore
-                console.error(`Expected JSON but got ${contentType || "unknown content type"}`);
-                console.error(`HTML response with success status code. The extraction process may not be working correctly.`);
-                console.error(`First 500 chars: ${responseText.substring(0, 500)}...`);
-                
-                extractionError = `Backend returned non-JSON response with success status code. Expected application/json.`;
-                
-                // Update database to indicate there might be an issue with extraction
-                await supabase
-                  .from('books')
-                  .update({
-                    status: 'extraction_warning',
-                    summary: `Book extraction started but backend returned HTML instead of JSON. Basic content is available.`
-                  })
-                  .eq('id', addedBookId);
-              } else {
-                // Error response
-                console.error(`Failed with endpoint ${apiPath}: Status ${backendResponse.status}`);
-                console.error(`Error response: ${responseText.substring(0, 500)}...`);
-                extractionError = `Status ${backendResponse.status} with ${apiPath}`;
+              } catch (endpointError) {
+                console.error(`Error with endpoint ${apiPath}:`, endpointError);
+                console.error(`Full error details: ${endpointError.stack || "No stack trace"}`);
+                extractionError = `${endpointError.message} with ${apiPath}`;
               }
-            } catch (endpointError) {
-              console.error(`Error with endpoint ${apiPath}:`, endpointError);
-              console.error(`Full error details: ${endpointError.stack || "No stack trace"}`);
-              extractionError = `${endpointError.message} with ${apiPath}`;
             }
           }
           
