@@ -288,10 +288,11 @@ serve(async (req) => {
       console.log(`Book added successfully with database ID: ${addedBookId}, Google Books ID: ${originalBookId}`);
       
       EdgeRuntime.waitUntil((async () => {
+        // First do local extraction which creates initial chunks
         const extractionResult = await extractFromGoogleBooks(addedBookId, originalBookId);
         console.log(`Local extraction completed with result:`, extractionResult);
         
-        // Trigger the backend extraction with fixed URL and improved error handling
+        // Trigger the backend extraction with fixed URL and improved debugging
         try {
           console.log("Triggering backend extraction process for more comprehensive results");
           
@@ -303,11 +304,13 @@ serve(async (req) => {
             `/api/books/extract-book/${addedBookId}`,
             `/books/extract-book/${addedBookId}`,
             `/api/extract-book/${addedBookId}`,
-            `/extract-book/${addedBookId}`
+            `/extract-book/${addedBookId}`,
+            `/api/debug-extract/${addedBookId}`  // New debug endpoint
           ];
           
           let extractionSuccess = false;
           let extractionError = null;
+          let responseData = null;
           
           // Try each API path format until one succeeds
           for (const apiPath of apiPaths) {
@@ -317,41 +320,54 @@ serve(async (req) => {
             console.log(`Trying backend extraction endpoint: ${backendExtractionUrl}`);
             
             try {
-              // Use proper headers for API request - specify JSON format explicitly
+              // Enhanced request with proper headers
               const backendResponse = await fetch(backendExtractionUrl, {
                 method: "POST",
                 headers: { 
                   "Content-Type": "application/json",
                   "Accept": "application/json",
-                  "User-Agent": "Supabase Edge Function"
+                  "User-Agent": "Supabase Edge Function/1.0",
+                  "X-Request-Source": "edge-function"
                 },
-                body: JSON.stringify({ book_id: addedBookId }),
+                body: JSON.stringify({ 
+                  book_id: addedBookId,
+                  external_id: originalBookId,
+                  force: true
+                }),
               });
               
-              // Log response details
+              // Log complete response details for debugging
               console.log(`Backend response status: ${backendResponse.status}`);
               console.log(`Backend response content-type: ${backendResponse.headers.get("content-type")}`);
               
               // Check if status is success (2xx)
               if (backendResponse.status >= 200 && backendResponse.status < 300) {
-                extractionSuccess = true;
-                
-                // Attempt to get response text
+                // Attempt to get response text first
                 const responseText = await backendResponse.text();
-                console.log(`Backend response (first 200 chars): ${responseText.substring(0, 200)}...`);
+                console.log(`Backend full response length: ${responseText.length} chars`);
+                console.log(`Backend response preview: ${responseText.substring(0, 200)}...`);
                 
                 // If it looks like JSON, try to parse it
+                let isJson = false;
                 if (responseText.trim().startsWith('{') || responseText.trim().startsWith('[')) {
                   try {
-                    const responseData = JSON.parse(responseText);
-                    console.log("Backend extraction process started successfully:", responseData);
+                    responseData = JSON.parse(responseText);
+                    console.log("Backend extraction JSON response:", responseData);
+                    isJson = true;
+                    extractionSuccess = true;
                   } catch (jsonError) {
-                    console.log("Response looks like JSON but couldn't be parsed. This is likely fine as the backend process should have started.");
+                    console.log("Response looks like JSON but parsing failed:", jsonError.message);
                   }
-                } else {
-                  console.log("Backend returned non-JSON response with success status code. The extraction process is likely running in the background.");
+                }
+                
+                if (!isJson) {
+                  console.log("Backend returned HTML response with success status. Contents:");
+                  console.log(responseText.substring(0, 500) + "...");
                   
-                  // Update the book status to indicate the extraction is in progress
+                  // Mark as success if we at least got a 200 OK
+                  extractionSuccess = true;
+                  
+                  // Update database to indicate extraction is in progress
                   await supabase
                     .from('books')
                     .update({
@@ -375,7 +391,7 @@ serve(async (req) => {
             }
           }
           
-          // If none of the endpoints worked, log a comprehensive error
+          // If none of the endpoints worked, log comprehensive error and update book status
           if (!extractionSuccess) {
             console.error("All backend extraction endpoints failed:", extractionError);
             
@@ -384,19 +400,22 @@ serve(async (req) => {
               .from('books')
               .update({
                 status: 'basic_extraction_only',
-                summary: `Basic information extracted. Full book preview extraction failed, but the book is still usable.`
+                summary: `Basic information extracted. Full book preview extraction failed, but the book is still usable with limited content.`
               })
               .eq('id', addedBookId);
+          } else {
+            console.log("Backend extraction call succeeded. Book processing should be happening in the background.");
           }
         } catch (backendError) {
           console.error("Error triggering backend extraction:", backendError);
+          console.error("Full error details:", backendError.stack || "No stack trace available");
           
           // Update book status to indicate extraction issue
           await supabase
             .from('books')
             .update({
               status: 'basic_extraction_only',
-              summary: `Basic information extracted. Full book preview extraction failed with error: ${backendError.message}`
+              summary: `Basic information extracted. Full book extraction failed with error: ${backendError.message}`
             })
             .eq('id', addedBookId);
         }
@@ -429,6 +448,7 @@ serve(async (req) => {
     }
   } catch (error) {
     console.error("Unexpected error:", error);
+    console.error("Stack trace:", error.stack || "No stack trace available");
     return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
