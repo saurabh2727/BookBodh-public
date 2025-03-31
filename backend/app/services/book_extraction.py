@@ -53,48 +53,81 @@ class BookExtractor:
         
         # Set default cache directory if none provided
         if cache_dir is None:
+            # Use an absolute path that will definitely be writable
             cache_dir = os.path.join(app_dir, "cache")
         
-        # Create cache directory structure using absolute paths
+        # Ensure cache directory is absolute
         self.cache_dir = os.path.abspath(cache_dir)
-        logger.info(f"Creating cache directory at: {self.cache_dir}")
+        logger.info(f"Using cache directory at: {self.cache_dir}")
         
+        # Create cache directory with verbose logging
         try:
-            os.makedirs(self.cache_dir, exist_ok=True)
-            logger.info(f"Cache directory created/exists: {os.path.exists(self.cache_dir)}")
+            if not os.path.exists(self.cache_dir):
+                logger.info(f"Creating cache directory: {self.cache_dir}")
+                os.makedirs(self.cache_dir, exist_ok=True)
+                logger.info(f"Cache directory created: {os.path.exists(self.cache_dir)}")
+            else:
+                logger.info(f"Cache directory already exists: {self.cache_dir}")
+                
+            # Check write permissions
+            test_file_path = os.path.join(self.cache_dir, "test_write.txt")
+            try:
+                with open(test_file_path, "w") as f:
+                    f.write("Test write")
+                os.remove(test_file_path)
+                logger.info(f"Cache directory is writable")
+            except Exception as e:
+                logger.error(f"Cache directory is not writable: {str(e)}")
+                # Try to use a temp directory as fallback
+                temp_dir = os.path.join(os.path.dirname(app_dir), "tmp")
+                logger.info(f"Trying fallback temp directory: {temp_dir}")
+                os.makedirs(temp_dir, exist_ok=True)
+                self.cache_dir = temp_dir
         except Exception as e:
             logger.error(f"Error creating cache directory: {str(e)}")
+            logger.error(traceback.format_exc())
+            # Use a fallback directory in /tmp
+            self.cache_dir = os.path.join("/tmp", "bookbodh_cache")
+            logger.info(f"Using fallback cache directory: {self.cache_dir}")
+            os.makedirs(self.cache_dir, exist_ok=True)
         
         # Create a dedicated screenshots directory
         self.screenshots_dir = os.path.join(self.cache_dir, "screenshots")
         logger.info(f"Creating screenshots directory at: {self.screenshots_dir}")
         
         try:
-            os.makedirs(self.screenshots_dir, exist_ok=True)
-            logger.info(f"Screenshots directory created/exists: {os.path.exists(self.screenshots_dir)}")
+            if not os.path.exists(self.screenshots_dir):
+                os.makedirs(self.screenshots_dir, exist_ok=True)
+                logger.info(f"Screenshots directory created: {os.path.exists(self.screenshots_dir)}")
+            else:
+                logger.info(f"Screenshots directory already exists: {self.screenshots_dir}")
+                
+            # Check if screenshots directory is writable
+            test_file_path = os.path.join(self.screenshots_dir, "test_screenshot.txt")
+            try:
+                with open(test_file_path, "w") as f:
+                    f.write("Test screenshot")
+                os.remove(test_file_path)
+                logger.info(f"Screenshots directory is writable")
+            except Exception as e:
+                logger.error(f"Screenshots directory is not writable: {str(e)}")
         except Exception as e:
             logger.error(f"Error creating screenshots directory: {str(e)}")
+            logger.error(traceback.format_exc())
+            # Use a fallback directory in /tmp
+            self.screenshots_dir = os.path.join("/tmp", "bookbodh_screenshots")
+            logger.info(f"Using fallback screenshots directory: {self.screenshots_dir}")
+            os.makedirs(self.screenshots_dir, exist_ok=True)
         
-        # List all directories and files in the app directory to help debug
-        logger.info("Listing contents of app directory:")
+        # List contents of cache directory to verify setup
+        logger.info(f"Listing contents of cache directory:")
         try:
-            for item in os.listdir(app_dir):
-                item_path = os.path.join(app_dir, item)
+            for item in os.listdir(self.cache_dir):
+                item_path = os.path.join(self.cache_dir, item)
                 item_type = "Directory" if os.path.isdir(item_path) else "File"
                 logger.info(f"  - {item_type}: {item}")
         except Exception as e:
-            logger.error(f"Error listing app directory contents: {str(e)}")
-        
-        # List contents of cache directory if it exists
-        if os.path.exists(self.cache_dir):
-            logger.info(f"Listing contents of cache directory:")
-            try:
-                for item in os.listdir(self.cache_dir):
-                    item_path = os.path.join(self.cache_dir, item)
-                    item_type = "Directory" if os.path.isdir(item_path) else "File"
-                    logger.info(f"  - {item_type}: {item}")
-            except Exception as e:
-                logger.error(f"Error listing cache directory contents: {str(e)}")
+            logger.error(f"Error listing cache directory contents: {str(e)}")
         
         self.selenium_available = SELENIUM_AVAILABLE
         logger.info(f"Selenium available: {self.selenium_available}")
@@ -124,13 +157,26 @@ class BookExtractor:
         
         logger.info(f"Creating book screenshot directory at: {book_screenshot_dir}")
         try:
+            # Make sure parent directories exist first
+            os.makedirs(os.path.dirname(book_screenshot_dir), exist_ok=True)
+            # Then create the book screenshot directory
             os.makedirs(book_screenshot_dir, exist_ok=True)
-            logger.info(f"Book screenshot directory created/exists: {os.path.exists(book_screenshot_dir)}")
+            logger.info(f"Book screenshot directory created: {os.path.exists(book_screenshot_dir)}")
+            
+            # Verify the directory is writable
+            test_file_path = os.path.join(book_screenshot_dir, "test_write.txt")
+            with open(test_file_path, "w") as f:
+                f.write("Test write")
+            os.remove(test_file_path)
+            logger.info(f"Book screenshot directory is writable")
         except Exception as e:
             logger.error(f"Error creating book screenshot directory: {str(e)}")
-            # Try to create parent directories if they don't exist
-            os.makedirs(os.path.dirname(book_screenshot_dir), exist_ok=True)
-            os.makedirs(book_screenshot_dir, exist_ok=True)
+            logger.error(traceback.format_exc())
+            # Use a fallback directory in /tmp with timestamp to avoid conflicts
+            fallback_dir = os.path.join("/tmp", f"bookbodh_{timestamp}_{book_id}")
+            logger.info(f"Using fallback book screenshot directory: {fallback_dir}")
+            os.makedirs(fallback_dir, exist_ok=True)
+            book_screenshot_dir = fallback_dir
         
         # Create a log file within the screenshot directory
         log_file_path = os.path.join(book_screenshot_dir, "extraction_log.txt")
@@ -221,15 +267,20 @@ class BookExtractor:
             logger.info(f"Taking initial screenshot: {initial_screenshot_path}")
             try:
                 driver.save_screenshot(initial_screenshot_path)
-                logger.info(f"Initial page load screenshot saved: {initial_screenshot_path}")
-                screenshot_paths.append(initial_screenshot_path)
-                
-                # Log file existence and size for debugging
                 if os.path.exists(initial_screenshot_path):
                     file_size = os.path.getsize(initial_screenshot_path)
-                    logger.info(f"Screenshot file exists, size: {file_size} bytes")
+                    logger.info(f"Initial page load screenshot saved: {initial_screenshot_path}, size: {file_size} bytes")
+                    screenshot_paths.append(initial_screenshot_path)
                 else:
-                    logger.error(f"Screenshot file doesn't exist: {initial_screenshot_path}")
+                    logger.error(f"Failed to save initial screenshot: file doesn't exist")
+                    
+                    # Try a fallback location
+                    fallback_path = os.path.join("/tmp", f"initial_page_load_{timestamp}.png")
+                    logger.info(f"Trying fallback screenshot location: {fallback_path}")
+                    driver.save_screenshot(fallback_path)
+                    if os.path.exists(fallback_path):
+                        logger.info(f"Screenshot saved to fallback location: {fallback_path}")
+                        screenshot_paths.append(fallback_path)
             except Exception as ss_error:
                 logger.error(f"Error taking initial screenshot: {str(ss_error)}")
                 logger.error(traceback.format_exc())
@@ -243,8 +294,12 @@ class BookExtractor:
             logger.info(f"Taking after-wait screenshot: {after_wait_screenshot_path}")
             try:
                 driver.save_screenshot(after_wait_screenshot_path)
-                logger.info(f"After wait screenshot saved: {after_wait_screenshot_path}")
-                screenshot_paths.append(after_wait_screenshot_path)
+                if os.path.exists(after_wait_screenshot_path):
+                    file_size = os.path.getsize(after_wait_screenshot_path)
+                    logger.info(f"After wait screenshot saved: {after_wait_screenshot_path}, size: {file_size} bytes")
+                    screenshot_paths.append(after_wait_screenshot_path)
+                else:
+                    logger.error(f"Failed to save after-wait screenshot: file doesn't exist")
             except Exception as ss_error:
                 logger.error(f"Error taking after-wait screenshot: {str(ss_error)}")
             
@@ -295,9 +350,15 @@ class BookExtractor:
                     
                     # Take a screenshot of the main page for debugging
                     main_page_ss_path = os.path.join(book_screenshot_dir, "main_page.png")
-                    driver.save_screenshot(main_page_ss_path)
-                    logger.info(f"Main page screenshot saved: {main_page_ss_path}")
-                    screenshot_paths.append(main_page_ss_path)
+                    try:
+                        driver.save_screenshot(main_page_ss_path)
+                        if os.path.exists(main_page_ss_path):
+                            logger.info(f"Main page screenshot saved: {main_page_ss_path}")
+                            screenshot_paths.append(main_page_ss_path)
+                        else:
+                            logger.error(f"Failed to save main page screenshot: file doesn't exist")
+                    except Exception as ss_error:
+                        logger.error(f"Error taking main page screenshot: {str(ss_error)}")
                     
                     # Try to capture DOM structure
                     try:
@@ -318,8 +379,11 @@ class BookExtractor:
                 iframe_screenshot_path = os.path.join(book_screenshot_dir, "inside_iframe.png")
                 try:
                     driver.save_screenshot(iframe_screenshot_path)
-                    logger.info(f"Inside iframe screenshot saved: {iframe_screenshot_path}")
-                    screenshot_paths.append(iframe_screenshot_path)
+                    if os.path.exists(iframe_screenshot_path):
+                        logger.info(f"Inside iframe screenshot saved: {iframe_screenshot_path}")
+                        screenshot_paths.append(iframe_screenshot_path)
+                    else:
+                        logger.error(f"Failed to save iframe screenshot: file doesn't exist")
                 except Exception as ss_error:
                     logger.error(f"Error taking iframe screenshot: {str(ss_error)}")
                 
@@ -362,13 +426,26 @@ class BookExtractor:
                     screenshot_path = os.path.join(book_screenshot_dir, f"book_page_{i+1}.png")
                     try:
                         driver.save_screenshot(screenshot_path)
-                        logger.info(f"Screenshot {i+1} saved: {screenshot_path}")
-                        screenshot_paths.append(screenshot_path)
-                        
-                        # Check if screenshot file exists and report size
                         if os.path.exists(screenshot_path):
                             file_size = os.path.getsize(screenshot_path)
-                            logger.info(f"Screenshot file {i+1} exists, size: {file_size} bytes")
+                            logger.info(f"Screenshot {i+1} saved: {screenshot_path}, size: {file_size} bytes")
+                            screenshot_paths.append(screenshot_path)
+                            
+                            # Check if screenshot file exists and report size
+                            if os.path.exists(screenshot_path):
+                                file_size = os.path.getsize(screenshot_path)
+                                logger.info(f"Screenshot file {i+1} exists, size: {file_size} bytes")
+                            else:
+                                logger.error(f"Screenshot file {i+1} doesn't exist: {screenshot_path}")
+                                
+                                # Try a fallback location
+                                fallback_path = os.path.join("/tmp", f"book_page_{i+1}_{timestamp}.png")
+                                logger.info(f"Trying fallback screenshot location: {fallback_path}")
+                                driver.save_screenshot(fallback_path)
+                                if os.path.exists(fallback_path):
+                                    logger.info(f"Screenshot saved to fallback location: {fallback_path}")
+                                    screenshot_paths.append(fallback_path)
+                                    screenshot_path = fallback_path
                         else:
                             logger.error(f"Screenshot file {i+1} doesn't exist: {screenshot_path}")
                     except Exception as ss_error:
@@ -376,10 +453,13 @@ class BookExtractor:
                     
                     # Check if screenshot is not empty (completely white or black)
                     try:
-                        image = Image.open(screenshot_path)
-                        is_blank = self._is_blank_image(image)
-                        if is_blank:
-                            logger.warning(f"Screenshot {i+1} appears to be blank or empty")
+                        if os.path.exists(screenshot_path):
+                            image = Image.open(screenshot_path)
+                            is_blank = self._is_blank_image(image)
+                            if is_blank:
+                                logger.warning(f"Screenshot {i+1} appears to be blank or empty")
+                        else:
+                            logger.error(f"Cannot check if image is blank - screenshot file {i+1} doesn't exist")
                     except Exception as img_error:
                         logger.error(f"Error checking if image {i+1} is blank: {str(img_error)}")
                     
@@ -396,9 +476,18 @@ class BookExtractor:
                             
                             # Save the extracted text to a file for debugging
                             text_file_path = os.path.join(book_screenshot_dir, f"page_{i+1}_text.txt")
-                            with open(text_file_path, "w", encoding="utf-8") as f:
-                                f.write(page_text)
-                            logger.info(f"Saved extracted text to: {text_file_path}")
+                            try:
+                                with open(text_file_path, "w", encoding="utf-8") as f:
+                                    f.write(page_text)
+                                logger.info(f"Saved extracted text to: {text_file_path}")
+                            except Exception as txt_write_error:
+                                logger.error(f"Error writing text file: {str(txt_write_error)}")
+                                
+                                # Try fallback location
+                                fallback_txt_path = os.path.join("/tmp", f"page_{i+1}_{timestamp}_text.txt")
+                                with open(fallback_txt_path, "w", encoding="utf-8") as f:
+                                    f.write(page_text)
+                                logger.info(f"Saved extracted text to fallback location: {fallback_txt_path}")
                             
                             if page_text_length > 0:
                                 page_texts.append(page_text)
@@ -441,9 +530,18 @@ class BookExtractor:
                 
                 # Save the combined text to a file
                 text_file_path = os.path.join(book_screenshot_dir, "extracted_text.txt")
-                with open(text_file_path, "w", encoding="utf-8") as f:
-                    f.write(extracted_text)
-                logger.info(f"Saved combined text ({len(extracted_text)} chars) to {text_file_path}")
+                try:
+                    with open(text_file_path, "w", encoding="utf-8") as f:
+                        f.write(extracted_text)
+                    logger.info(f"Saved combined text ({len(extracted_text)} chars) to {text_file_path}")
+                except Exception as txt_write_error:
+                    logger.error(f"Error writing combined text file: {str(txt_write_error)}")
+                    
+                    # Try fallback location
+                    fallback_txt_path = os.path.join("/tmp", f"extracted_text_{timestamp}.txt")
+                    with open(fallback_txt_path, "w", encoding="utf-8") as f:
+                        f.write(extracted_text)
+                    logger.info(f"Saved combined text to fallback location: {fallback_txt_path}")
                 
                 # Create a JSON cache file with metadata and text
                 cache_file_path = os.path.join(self.cache_dir, f"book_{book_id}.json")
@@ -457,9 +555,18 @@ class BookExtractor:
                     "screenshot_dir": book_screenshot_dir
                 }
                 
-                with open(cache_file_path, "w", encoding="utf-8") as f:
-                    json.dump(cache_data, f, indent=2)
-                logger.info(f"Saved extraction metadata to {cache_file_path}")
+                try:
+                    with open(cache_file_path, "w", encoding="utf-8") as f:
+                        json.dump(cache_data, f, indent=2)
+                    logger.info(f"Saved extraction metadata to {cache_file_path}")
+                except Exception as json_write_error:
+                    logger.error(f"Error writing cache JSON: {str(json_write_error)}")
+                    
+                    # Try fallback location
+                    fallback_json_path = os.path.join("/tmp", f"book_{book_id}_{timestamp}.json")
+                    with open(fallback_json_path, "w", encoding="utf-8") as f:
+                        json.dump(cache_data, f, indent=2)
+                    logger.info(f"Saved extraction metadata to fallback location: {fallback_json_path}")
                 
             except Exception as iframe_error:
                 logger.error(f"Error processing iframe: {str(iframe_error)}")
@@ -476,9 +583,18 @@ class BookExtractor:
                 
                 dom_structure = driver.execute_script("return document.body.innerHTML")
                 dom_file_path = os.path.join(book_screenshot_dir, "dom_structure.html")
-                with open(dom_file_path, "w", encoding="utf-8") as f:
-                    f.write(dom_structure)
-                logger.info(f"Saved DOM structure to: {dom_file_path}")
+                try:
+                    with open(dom_file_path, "w", encoding="utf-8") as f:
+                        f.write(dom_structure)
+                    logger.info(f"Saved DOM structure to: {dom_file_path}")
+                except Exception as dom_write_error:
+                    logger.error(f"Error writing DOM structure: {str(dom_write_error)}")
+                    
+                    # Try fallback location
+                    fallback_dom_path = os.path.join("/tmp", f"dom_structure_{timestamp}.html")
+                    with open(fallback_dom_path, "w", encoding="utf-8") as f:
+                        f.write(dom_structure)
+                    logger.info(f"Saved DOM structure to fallback location: {fallback_dom_path}")
                 
                 extracted_text = "Error processing Google Books page. See logs for details."
                 
@@ -514,6 +630,12 @@ class BookExtractor:
             logger.info(f"Saved extraction status to {status_file_path}")
         except Exception as status_error:
             logger.error(f"Error saving status file: {str(status_error)}")
+            
+            # Try fallback location
+            fallback_status_path = os.path.join("/tmp", f"extraction_status_{timestamp}.json")
+            with open(fallback_status_path, "w", encoding="utf-8") as f:
+                json.dump(status_data, f, indent=2)
+            logger.info(f"Saved extraction status to fallback location: {fallback_status_path}")
         
         return extracted_text, screenshot_paths
     
@@ -576,8 +698,17 @@ class BookExtractor:
         
         # Save the chunks to a chunks file for debugging
         chunks_file_path = os.path.join(self.cache_dir, f"book_{book_id}_chunks.json")
-        with open(chunks_file_path, "w", encoding="utf-8") as f:
-            json.dump(chunks, f, indent=2)
-        logger.info(f"Saved chunks data to {chunks_file_path}")
+        try:
+            with open(chunks_file_path, "w", encoding="utf-8") as f:
+                json.dump(chunks, f, indent=2)
+            logger.info(f"Saved chunks data to {chunks_file_path}")
+        except Exception as chunks_write_error:
+            logger.error(f"Error writing chunks file: {str(chunks_write_error)}")
+            
+            # Try fallback location
+            fallback_chunks_path = os.path.join("/tmp", f"book_{book_id}_chunks.json")
+            with open(fallback_chunks_path, "w", encoding="utf-8") as f:
+                json.dump(chunks, f, indent=2)
+            logger.info(f"Saved chunks data to fallback location: {fallback_chunks_path}")
         
         return chunks
