@@ -1,3 +1,4 @@
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.38.4";
@@ -290,25 +291,33 @@ serve(async (req) => {
         const extractionResult = await extractFromGoogleBooks(addedBookId, originalBookId);
         console.log(`Local extraction completed with result:`, extractionResult);
         
-        if (Deno.env.get("BACKEND_API_URL")) {
-          try {
-            console.log("Triggering backend extraction process for more comprehensive results");
-            const backendExtractionUrl = `${Deno.env.get("BACKEND_API_URL")}/extract-book/${addedBookId}`;
-            
-            const backendResponse = await fetch(backendExtractionUrl, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ book_id: addedBookId }),
-            });
-            
-            if (backendResponse.ok) {
-              console.log("Backend extraction process started successfully");
-            } else {
-              console.error("Failed to start backend extraction process:", await backendResponse.text());
-            }
-          } catch (backendError) {
-            console.error("Error triggering backend extraction:", backendError);
+        // Update backend extraction call to use the correct URL format
+        try {
+          console.log("Triggering backend extraction process for more comprehensive results");
+          
+          // Get the backend URL from environment or use a default
+          const backendUrl = Deno.env.get("BACKEND_API_URL") || "https://ethical-wisdom-bot.lovable.app";
+          
+          // Correctly format the URL to match the FastAPI endpoint path
+          const backendExtractionUrl = `${backendUrl}/books/extract-book/${addedBookId}`;
+          
+          console.log(`Calling backend extraction endpoint: ${backendExtractionUrl}`);
+          
+          const backendResponse = await fetch(backendExtractionUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ book_id: addedBookId }),
+          });
+          
+          if (backendResponse.ok) {
+            const responseData = await backendResponse.json();
+            console.log("Backend extraction process started successfully:", responseData);
+          } else {
+            const errorText = await backendResponse.text();
+            console.error(`Failed to start backend extraction process: Status ${backendResponse.status}`, errorText);
           }
+        } catch (backendError) {
+          console.error("Error triggering backend extraction:", backendError);
         }
       })());
       

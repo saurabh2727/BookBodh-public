@@ -434,7 +434,7 @@ async function triggerExtraction(bookId: string) {
     
     // Get the backend API URL from environment or use default
     const apiUrl = Deno.env.get("BACKEND_API_URL") || "https://ethical-wisdom-bot.lovable.app";
-    const extractionUrl = `${apiUrl}/extract-book/${bookId}`;
+    const extractionUrl = `${apiUrl}/books/extract-book/${bookId}`;
     
     console.log(`Calling extraction endpoint: ${extractionUrl}`);
     
