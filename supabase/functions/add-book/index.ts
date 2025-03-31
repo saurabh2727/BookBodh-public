@@ -345,41 +345,36 @@ serve(async (req) => {
               console.log(`Backend full response length: ${responseText.length} chars`);
               console.log(`Backend response preview: ${responseText.substring(0, 500)}...`);
               
-              // Check if status is success (2xx)
-              if (backendResponse.status >= 200 && backendResponse.status < 300) {
-                // Check if the content-type is JSON
-                if (contentType && contentType.includes("application/json")) {
-                  try {
-                    responseData = JSON.parse(responseText);
-                    console.log("Backend extraction JSON response:", responseData);
-                    extractionSuccess = true;
-                  } catch (jsonError) {
-                    console.error(`Error parsing JSON response: ${jsonError.message}`);
-                    console.error(`Response was: ${responseText.substring(0, 500)}...`);
-                    extractionError = `JSON parsing error: ${jsonError.message}`;
-                  }
-                } else {
-                  console.log(`Expected JSON but got ${contentType || "unknown content type"}`);
-                  console.log(`HTML response with success status. First 500 chars:`);
-                  console.log(responseText.substring(0, 500) + "...");
-                  
-                  // Mark as success if we at least got a 200 OK
-                  // This allows the process to continue even if the backend returns HTML
+              // Check if status is success (2xx) AND the content-type is JSON
+              if (backendResponse.status >= 200 && backendResponse.status < 300 && 
+                  contentType && contentType.includes("application/json")) {
+                try {
+                  responseData = JSON.parse(responseText);
+                  console.log("Backend extraction JSON response:", responseData);
                   extractionSuccess = true;
-                  
-                  // Update database to indicate extraction is in progress
-                  await supabase
-                    .from('books')
-                    .update({
-                      status: 'extracting',
-                      summary: `Book extraction in progress. This may take a few minutes.`
-                    })
-                    .eq('id', addedBookId);
+                } catch (jsonError) {
+                  console.error(`Error parsing JSON response: ${jsonError.message}`);
+                  console.error(`Response was: ${responseText.substring(0, 500)}...`);
+                  extractionError = `JSON parsing error: ${jsonError.message}`;
                 }
+              } else if (backendResponse.status >= 200 && backendResponse.status < 300) {
+                // HTML response with success status - this is NOT considered a success anymore
+                console.error(`Expected JSON but got ${contentType || "unknown content type"}`);
+                console.error(`HTML response with success status code. The extraction process may not be working correctly.`);
+                console.error(`First 500 chars: ${responseText.substring(0, 500)}...`);
                 
-                break; // Exit the loop on success
+                extractionError = `Backend returned non-JSON response with success status code. Expected application/json.`;
+                
+                // Update database to indicate there might be an issue with extraction
+                await supabase
+                  .from('books')
+                  .update({
+                    status: 'extraction_warning',
+                    summary: `Book extraction started but backend returned HTML instead of JSON. Basic content is available.`
+                  })
+                  .eq('id', addedBookId);
               } else {
-                // Log error details
+                // Error response
                 console.error(`Failed with endpoint ${apiPath}: Status ${backendResponse.status}`);
                 console.error(`Error response: ${responseText.substring(0, 500)}...`);
                 extractionError = `Status ${backendResponse.status} with ${apiPath}`;
@@ -400,7 +395,7 @@ serve(async (req) => {
               .from('books')
               .update({
                 status: 'basic_extraction_only',
-                summary: `Basic information extracted. Full book preview extraction failed, but the book is still usable with limited content.`
+                summary: `Basic information extracted. Full book preview extraction failed: ${extractionError}`
               })
               .eq('id', addedBookId);
           } else {
