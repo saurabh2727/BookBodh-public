@@ -8,77 +8,155 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Separator } from './ui/separator';
 import { Badge } from './ui/badge';
 import { useToast } from './ui/use-toast';
-import { Loader2, CheckCircle, XCircle, AlertTriangle, Info, ServerCrash } from 'lucide-react';
+import { toast as sonnerToast } from 'sonner';
+import { Loader2, CheckCircle, XCircle, AlertTriangle, Info, ServerCrash, RefreshCw } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 
 interface ApiResponse {
   [key: string]: any;
 }
 
+interface BackendTestResult {
+  success: boolean;
+  backend_url: string;
+  full_url: string;
+  response_status: number | null;
+  content_type: string | null;
+  is_json: boolean;
+  is_html: boolean;
+  message: string;
+  suggested_backend_url?: string | null;
+}
+
 const DiagnosticPanel: React.FC = () => {
-  const [activeTab, setActiveTab] = useState('directories');
+  const [activeTab, setActiveTab] = useState('backend-test');
   const [isLoading, setIsLoading] = useState(false);
   const [response, setResponse] = useState<ApiResponse | null>(null);
+  const [backendResult, setBackendResult] = useState<BackendTestResult | null>(null);
   const [bookId, setBookId] = useState('');
   const [bookTitle, setBookTitle] = useState('Test Book');
   const [isBackendConnected, setIsBackendConnected] = useState(false);
   const [apiUrl, setApiUrl] = useState(import.meta.env.VITE_API_URL || 'http://localhost:8000');
+  const [isTesting, setIsTesting] = useState(false);
   const { toast } = useToast();
 
-  const checkBackendConnection = async () => {
+  const checkBackendConnection = async (showToast = true) => {
     try {
-      setIsLoading(true);
-      console.log(`Checking backend connection to ${apiUrl}/health`);
+      setIsTesting(true);
+      console.log(`Testing backend connection to ${apiUrl}`);
       
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000); // Increased timeout
-
-      const response = await fetch(`${apiUrl}/health`, {
-        signal: controller.signal,
-        mode: 'cors',
-        headers: {
-          'Accept': 'application/json',
+      // Use the Supabase edge function for proper testing
+      const { data, error } = await supabase.functions.invoke('test-backend-api', {
+        body: { 
+          url: apiUrl,
+          additionalPaths: true
         }
-      }).then(res => {
-        clearTimeout(timeoutId);
-        return res;
       });
       
-      if (response.ok) {
-        const data = await response.json();
-        console.log('Backend health check successful:', data);
-        setIsBackendConnected(true);
+      if (error) {
+        console.error('Edge function error:', error);
+        setIsBackendConnected(false);
+        setBackendResult(null);
         
-        toast({
-          title: "Backend connected",
-          description: `Successfully connected to ${apiUrl}`,
-        });
+        if (showToast) {
+          toast({
+            variant: "destructive",
+            title: "Backend test failed",
+            description: `Edge function error: ${error.message}`,
+          });
+        }
+        return false;
+      }
+      
+      // Store the detailed test result
+      setBackendResult(data);
+      
+      // Set connection status based on the test result
+      setIsBackendConnected(data.success);
+      
+      if (data.success) {
+        if (showToast) {
+          toast({
+            title: "Backend connected",
+            description: `Successfully connected to ${data.backend_url}`,
+          });
+        }
+        
+        // If we got a suggestion for a better backend URL, show it
+        if (data.suggested_backend_url && data.suggested_backend_url !== apiUrl) {
+          sonnerToast.info(
+            `A different backend URL might work better: ${data.suggested_backend_url}`, 
+            {
+              action: {
+                label: 'Use this URL',
+                onClick: () => {
+                  setApiUrl(data.suggested_backend_url);
+                  localStorage.setItem('diagnostics_api_url', data.suggested_backend_url);
+                  checkBackendConnection();
+                }
+              },
+              duration: 10000
+            }
+          );
+        }
         
         return true;
       } else {
-        console.error('Backend health check failed with status:', response.status);
-        setIsBackendConnected(false);
+        if (showToast) {
+          toast({
+            variant: "destructive",
+            title: "Backend connection failed",
+            description: data.message || "Could not connect to backend service",
+          });
+          
+          // If we received HTML instead of JSON, show a special toast
+          if (data.is_html) {
+            sonnerToast.error(
+              "Received HTML instead of JSON response", 
+              {
+                description: "This typically happens when the request is hitting the frontend application instead of the backend API server.",
+                duration: 10000
+              }
+            );
+          }
+        }
         
-        toast({
-          variant: "destructive",
-          title: "Backend connection failed",
-          description: `Failed to connect to ${apiUrl} (Status: ${response.status})`,
-        });
+        // If we got a suggestion for a better backend URL, show it
+        if (data.suggested_backend_url && data.suggested_backend_url !== apiUrl) {
+          sonnerToast.info(
+            `A different backend URL might work better: ${data.suggested_backend_url}`, 
+            {
+              action: {
+                label: 'Use this URL',
+                onClick: () => {
+                  setApiUrl(data.suggested_backend_url);
+                  localStorage.setItem('diagnostics_api_url', data.suggested_backend_url);
+                  checkBackendConnection();
+                }
+              },
+              duration: 10000
+            }
+          );
+        }
         
         return false;
       }
     } catch (error) {
       console.error("Backend connection check failed:", error);
       setIsBackendConnected(false);
+      setBackendResult(null);
       
-      toast({
-        variant: "destructive",
-        title: "Backend connection failed",
-        description: error instanceof Error ? error.message : "Unknown error occurred",
-      });
+      if (showToast) {
+        toast({
+          variant: "destructive",
+          title: "Backend connection failed",
+          description: error instanceof Error ? error.message : "Unknown error occurred",
+        });
+      }
       
       return false;
     } finally {
-      setIsLoading(false);
+      setIsTesting(false);
     }
   };
 
@@ -86,7 +164,7 @@ const DiagnosticPanel: React.FC = () => {
     setIsLoading(true);
     
     // Check backend connection first
-    const isConnected = await checkBackendConnection();
+    const isConnected = await checkBackendConnection(false);
     
     if (!isConnected) {
       setResponse({
@@ -148,6 +226,8 @@ const DiagnosticPanel: React.FC = () => {
       fetchDiagnosticData('books');
     } else if (value === 'selenium') {
       fetchDiagnosticData('selenium');
+    } else if (value === 'backend-test') {
+      checkBackendConnection(false);
     }
   };
 
@@ -162,7 +242,7 @@ const DiagnosticPanel: React.FC = () => {
     }
     
     // Check backend connection first
-    const isConnected = await checkBackendConnection();
+    const isConnected = await checkBackendConnection(false);
     
     if (!isConnected) {
       toast({
@@ -182,6 +262,8 @@ const DiagnosticPanel: React.FC = () => {
         mode: 'cors',
         headers: {
           'Accept': 'application/json',
+          'X-API-Request': 'true',
+          'X-Backend-Request': 'true'
         }
       });
       
@@ -240,7 +322,7 @@ const DiagnosticPanel: React.FC = () => {
     }
     
     // Check if backend is running
-    checkBackendConnection();
+    checkBackendConnection(false);
   }, []);
 
   const renderBackendConnectionStatus = () => (
@@ -255,10 +337,10 @@ const DiagnosticPanel: React.FC = () => {
         variant="outline" 
         size="sm" 
         onClick={() => checkBackendConnection()}
-        disabled={isLoading}
+        disabled={isTesting}
         className="ml-2"
       >
-        {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+        {isTesting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
         Check Connection
       </Button>
     </div>
@@ -293,10 +375,10 @@ const DiagnosticPanel: React.FC = () => {
                     variant="outline" 
                     size="sm" 
                     onClick={() => checkBackendConnection()}
-                    disabled={isLoading}
+                    disabled={isTesting}
                     className="mt-3 border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/30"
                   >
-                    {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                    {isTesting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
                     Retry Connection
                   </Button>
                 </div>
@@ -315,8 +397,8 @@ const DiagnosticPanel: React.FC = () => {
                   placeholder="http://localhost:8000"
                   className="flex-1"
                 />
-                <Button onClick={handleApiUrlSubmit} disabled={isLoading}>
-                  {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                <Button onClick={handleApiUrlSubmit} disabled={isTesting}>
+                  {isTesting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                   Update URL
                 </Button>
               </div>
@@ -326,11 +408,155 @@ const DiagnosticPanel: React.FC = () => {
         
         <Tabs value={activeTab} onValueChange={handleTabChange}>
           <TabsList className="mb-4">
+            <TabsTrigger value="backend-test">Backend Test</TabsTrigger>
             <TabsTrigger value="directories">Directories</TabsTrigger>
             <TabsTrigger value="books">Books</TabsTrigger>
             <TabsTrigger value="selenium">Selenium Test</TabsTrigger>
             <TabsTrigger value="extraction">Book Extraction</TabsTrigger>
           </TabsList>
+          
+          <TabsContent value="backend-test" className="space-y-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-medium">Backend Connection Test</h3>
+              <Button 
+                size="sm" 
+                onClick={() => checkBackendConnection()} 
+                disabled={isTesting}
+              >
+                {isTesting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                Test Connection
+              </Button>
+            </div>
+            
+            {backendResult && (
+              <Card className="overflow-hidden border border-muted">
+                <CardHeader className={`py-3 ${backendResult.success ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20'}`}>
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-2">
+                      {backendResult.success ? (
+                        <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400" />
+                      ) : (
+                        <XCircle className="h-5 w-5 text-red-600 dark:text-red-400" />
+                      )}
+                      <CardTitle className="text-base">
+                        {backendResult.success ? 'Connection Successful' : 'Connection Failed'}
+                      </CardTitle>
+                    </div>
+                    <Badge variant={backendResult.success ? 'default' : 'destructive'}>
+                      {backendResult.response_status ? `Status: ${backendResult.response_status}` : 'No Response'}
+                    </Badge>
+                  </div>
+                  <CardDescription className="text-sm ml-7">
+                    {backendResult.message}
+                  </CardDescription>
+                </CardHeader>
+                
+                <CardContent className="p-0">
+                  <div className="p-4 border-b">
+                    <h4 className="font-medium text-sm mb-2">Connection Details</h4>
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      <div className="font-medium text-muted-foreground">URL:</div>
+                      <div className="font-mono text-xs overflow-hidden text-ellipsis">{backendResult.full_url}</div>
+                      
+                      <div className="font-medium text-muted-foreground">Content Type:</div>
+                      <div>{backendResult.content_type || 'N/A'}</div>
+                      
+                      <div className="font-medium text-muted-foreground">Response Format:</div>
+                      <div className="flex items-center gap-1">
+                        {backendResult.is_json ? (
+                          <>
+                            <CheckCircle className="h-3.5 w-3.5 text-green-600 dark:text-green-400" />
+                            <span>JSON</span>
+                          </>
+                        ) : backendResult.is_html ? (
+                          <>
+                            <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+                            <span>HTML (expected JSON)</span>
+                          </>
+                        ) : (
+                          <span>Unknown format</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {backendResult.response_preview && (
+                    <div className="p-4">
+                      <h4 className="font-medium text-sm mb-2">Response Preview</h4>
+                      <pre className="bg-muted p-2 rounded text-xs overflow-auto max-h-40 whitespace-pre-wrap">
+                        {backendResult.response_preview}
+                      </pre>
+                    </div>
+                  )}
+                  
+                  {backendResult.is_html && (
+                    <div className="p-4 bg-amber-50 dark:bg-amber-900/20 border-t border-amber-200 dark:border-amber-800">
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400 mt-0.5" />
+                        <div>
+                          <h4 className="font-medium text-amber-800 dark:text-amber-300">HTML Response Detected</h4>
+                          <p className="text-sm text-amber-600 dark:text-amber-400 mt-1">
+                            The backend is returning HTML instead of JSON. This typically happens when:
+                          </p>
+                          <ul className="list-disc list-inside text-sm text-amber-600 dark:text-amber-400 mt-1 ml-1">
+                            <li>The API request is being routed to the frontend application</li>
+                            <li>The backend URL is incorrect or pointing to a web server</li>
+                            <li>The API endpoint doesn't exist or is returning a web page</li>
+                          </ul>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {backendResult.suggested_backend_url && (
+                    <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border-t border-blue-200 dark:border-blue-800">
+                      <div className="flex items-start gap-2">
+                        <Info className="h-5 w-5 text-blue-600 dark:text-blue-400 mt-0.5" />
+                        <div>
+                          <h4 className="font-medium text-blue-800 dark:text-blue-300">Suggested Backend URL</h4>
+                          <p className="text-sm text-blue-600 dark:text-blue-400 mt-1">
+                            A different backend URL might work better: <span className="font-mono">{backendResult.suggested_backend_url}</span>
+                          </p>
+                          <Button 
+                            size="sm" 
+                            variant="outline" 
+                            className="mt-2 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300"
+                            onClick={() => {
+                              setApiUrl(backendResult.suggested_backend_url!);
+                              localStorage.setItem('diagnostics_api_url', backendResult.suggested_backend_url!);
+                              checkBackendConnection();
+                            }}
+                          >
+                            Use This URL
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {!backendResult && !isTesting && (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <ServerCrash className="h-12 w-12 text-muted-foreground mb-4 opacity-50" />
+                <h3 className="text-xl font-semibold mb-2">No Connection Data</h3>
+                <p className="text-muted-foreground max-w-md">
+                  Click the "Test Connection" button to check the backend server connectivity.
+                </p>
+              </div>
+            )}
+
+            {isTesting && (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <Loader2 className="h-12 w-12 text-primary mb-4 animate-spin" />
+                <h3 className="text-xl font-semibold mb-2">Testing Connection</h3>
+                <p className="text-muted-foreground max-w-md">
+                  Please wait while we test the connection to the backend server...
+                </p>
+              </div>
+            )}
+          </TabsContent>
           
           <TabsContent value="extraction" className="space-y-4">
             <div className="flex items-end gap-2">
