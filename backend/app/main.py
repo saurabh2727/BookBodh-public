@@ -1,4 +1,5 @@
-from fastapi import FastAPI, HTTPException, Depends
+
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 import os
@@ -27,7 +28,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],  # Allow all methods
     allow_headers=["*"],  # Allow all headers
-    expose_headers=["Content-Type", "Content-Disposition"],
+    expose_headers=["Content-Type", "Content-Disposition", "X-API-Request", "X-Backend-Request"],
 )
 
 # Include routers
@@ -50,11 +51,26 @@ os.makedirs(cache_dir, exist_ok=True)
 os.makedirs(screenshots_dir, exist_ok=True)
 os.makedirs(uploads_dir, exist_ok=True)
 
+# Helper to check if a request is an API request (vs. a frontend request)
+def is_api_request(request: Request) -> bool:
+    """Check if this request is intended for the API vs the frontend"""
+    # Check for special headers that indicate an API request
+    api_request = request.headers.get("X-API-Request") == "true"
+    backend_request = request.headers.get("X-Backend-Request") == "true"
+    accept_header = request.headers.get("Accept", "")
+    
+    # If any of these conditions are true, consider it an API request
+    return api_request or backend_request or "application/json" in accept_header
+
 @app.get("/")
-async def root():
+async def root(request: Request):
     """
     Root endpoint with basic information
     """
+    # Log all headers if in debug mode
+    is_api = is_api_request(request)
+    logger.info(f"Root endpoint called, is_api_request: {is_api}")
+    
     # Get current directory info
     try:
         base_dir = os.path.dirname(os.path.dirname(__file__))
@@ -114,13 +130,14 @@ async def root():
         }
 
 @app.get("/health")
-async def health_check():
+async def health_check(request: Request):
     """
     Health check endpoint for monitoring and diagnostics
     """
     try:
         # Enhanced logging for health check
-        logger.info("Health check endpoint called")
+        is_api = is_api_request(request)
+        logger.info(f"Health check endpoint called, is_api_request: {is_api}")
         
         # Check essential directories
         app_dir = os.path.dirname(__file__)
@@ -142,7 +159,8 @@ async def health_check():
             "directories": {
                 "cache": os.path.exists(cache_dir),
                 "screenshots": os.path.exists(screenshots_dir)
-            }
+            },
+            "api_name": "BookBodh Backend API"
         }
     except Exception as e:
         logger.error(f"Health check failed: {str(e)}")
@@ -152,17 +170,25 @@ async def health_check():
         }
 
 @app.get("/api/health")
-async def api_health_check():
+async def api_health_check(request: Request):
     """
     API-prefixed health check endpoint to test API routing
     """
     try:
-        logger.info("API health check endpoint called")
+        # Log whether this is an API request
+        is_api = is_api_request(request)
+        logger.info(f"API health check endpoint called, is_api_request: {is_api}")
+        
+        # Log headers in debug mode
+        if settings.debug:
+            logger.debug(f"Request headers: {dict(request.headers)}")
+            
         return {
             "status": "healthy",
             "message": "BookBodh API endpoint is accessible",
             "version": "1.0.0",
-            "api_routing": "working"
+            "api_routing": "working",
+            "api_name": "BookBodh Backend API"
         }
     except Exception as e:
         logger.error(f"API health check failed: {str(e)}")
@@ -172,10 +198,14 @@ async def api_health_check():
         }
 
 @app.get("/api/test")
-async def api_test():
+async def api_test(request: Request):
     """
     Simple endpoint to test API routing
     """
+    # Log whether this is an API request
+    is_api = is_api_request(request)
+    logger.info(f"API test endpoint called, is_api_request: {is_api}")
+    
     return {
         "status": "success",
         "message": "API endpoint is working correctly",
@@ -183,8 +213,11 @@ async def api_test():
     }
 
 @app.get("/api-routes")
-async def list_api_routes():
+async def list_api_routes(request: Request):
     """List all available API routes for debugging"""
+    is_api = is_api_request(request)
+    logger.info(f"API routes endpoint called, is_api_request: {is_api}")
+    
     routes = []
     for route in app.routes:
         routes.append({
@@ -209,9 +242,11 @@ async def list_api_routes():
     }
 
 @app.get("/test-chat")
-async def test_chat_endpoint():
+async def test_chat_endpoint(request: Request):
     """Test if the chat endpoint is properly registered"""
-    logger.info("Testing chat endpoint registration")
+    is_api = is_api_request(request)
+    logger.info(f"Test chat endpoint called, is_api_request: {is_api}")
+    
     try:
         # Check if the chat router is properly included
         is_chat_router_included = False
@@ -238,8 +273,11 @@ async def test_chat_endpoint():
         }
 
 @app.get("/diagnostic/selenium")
-async def test_selenium():
+async def test_selenium(request: Request):
     """Test if Selenium is working properly"""
+    is_api = is_api_request(request)
+    logger.info(f"Selenium test endpoint called, is_api_request: {is_api}")
+    
     try:
         from selenium import webdriver
         from selenium.webdriver.chrome.service import Service
@@ -282,8 +320,12 @@ async def test_selenium():
         }
 
 @app.get("/diagnostic/book-extraction/{book_id}")
-async def test_book_extraction(book_id: str, title: str = "Test Book"):
+async def test_book_extraction(book_id: str, title: str = "Test Book", request: Request = None):
     """Test book extraction for a specific Google Books ID"""
+    if request:
+        is_api = is_api_request(request)
+        logger.info(f"Book extraction test endpoint called for book_id={book_id}, is_api_request: {is_api}")
+    
     if not book_id:
         raise HTTPException(status_code=400, detail="Book ID is required")
     
@@ -336,8 +378,12 @@ async def test_book_extraction(book_id: str, title: str = "Test Book"):
         }
 
 @app.get("/diagnostic/directories")
-async def list_directories():
+async def list_directories(request: Request = None):
     """List all relevant directories and their contents"""
+    if request:
+        is_api = is_api_request(request)
+        logger.info(f"Directories endpoint called, is_api_request: {is_api}")
+    
     directories = {
         "app_dir": app_dir,
         "uploads_dir": uploads_dir,
@@ -380,8 +426,12 @@ async def list_directories():
     }
 
 @app.get("/diagnostic/books")
-async def list_books():
+async def list_books(request: Request = None):
     """List all books in the database"""
+    if request:
+        is_api = is_api_request(request)
+        logger.info(f"Books endpoint called, is_api_request: {is_api}")
+    
     try:
         book_db = BookDatabase()
         books = book_db.get_books()
@@ -419,11 +469,13 @@ async def list_books():
         }
 
 @app.post("/api/debug-extract/{book_id}")
-async def debug_extract_book(book_id: str):
+async def debug_extract_book(book_id: str, request: Request = None):
     """
     Debug endpoint for book extraction
     """
-    logger.info(f"Debug extraction endpoint called for book_id={book_id}")
+    if request:
+        is_api = is_api_request(request)
+        logger.info(f"Debug extraction endpoint called for book_id={book_id}, is_api_request: {is_api}")
     
     return {
         "status": "received",

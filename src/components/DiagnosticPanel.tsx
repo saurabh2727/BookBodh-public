@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -8,26 +9,12 @@ import { Separator } from './ui/separator';
 import { Badge } from './ui/badge';
 import { useToast } from './ui/use-toast';
 import { toast as sonnerToast } from 'sonner';
-import { Loader2, CheckCircle, XCircle, AlertTriangle, Info, ServerCrash, RefreshCw } from 'lucide-react';
+import { Loader2, CheckCircle, XCircle, AlertTriangle, Info, ServerCrash, RefreshCw, Bug, Code, Terminal } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { BackendTestResult } from '@/types';
 
 interface ApiResponse {
   [key: string]: any;
-}
-
-interface BackendTestResult {
-  success: boolean;
-  backend_url: string;
-  full_url: string;
-  response_status: number | null;
-  content_type: string | null;
-  is_json: boolean;
-  is_html: boolean;
-  message: string;
-  suggested_backend_url?: string | null;
-  response_preview?: string | null;
-  response_size?: number;
-  parsed_json?: any;
 }
 
 const DiagnosticPanel: React.FC = () => {
@@ -40,6 +27,7 @@ const DiagnosticPanel: React.FC = () => {
   const [isBackendConnected, setIsBackendConnected] = useState(false);
   const [apiUrl, setApiUrl] = useState(import.meta.env.VITE_API_URL || 'http://localhost:8000');
   const [isTesting, setIsTesting] = useState(false);
+  const [isDebugMode, setIsDebugMode] = useState(false);
   const { toast } = useToast();
 
   const checkBackendConnection = async (showToast = true) => {
@@ -50,7 +38,8 @@ const DiagnosticPanel: React.FC = () => {
       const { data, error } = await supabase.functions.invoke('test-backend-api', {
         body: { 
           url: apiUrl,
-          additionalPaths: true
+          additionalPaths: true,
+          debug: isDebugMode
         }
       });
       
@@ -180,6 +169,8 @@ const DiagnosticPanel: React.FC = () => {
         mode: 'cors',
         headers: {
           'Accept': 'application/json',
+          'X-API-Request': 'true',
+          'X-Backend-Request': 'true'
         }
       });
       
@@ -307,6 +298,16 @@ const DiagnosticPanel: React.FC = () => {
     localStorage.setItem('diagnostics_api_url', apiUrl);
     checkBackendConnection();
   };
+  
+  const toggleDebugMode = () => {
+    setIsDebugMode(!isDebugMode);
+    if (!isDebugMode) {
+      toast({
+        title: "Debug mode enabled",
+        description: "Additional diagnostic information will be collected",
+      });
+    }
+  };
 
   useEffect(() => {
     const savedApiUrl = localStorage.getItem('diagnostics_api_url');
@@ -334,6 +335,15 @@ const DiagnosticPanel: React.FC = () => {
       >
         {isTesting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
         Check Connection
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={toggleDebugMode}
+        className={isDebugMode ? "bg-amber-100 dark:bg-amber-900/20" : ""}
+      >
+        <Bug className="h-4 w-4 mr-2" />
+        {isDebugMode ? "Debug On" : "Debug"}
       </Button>
     </div>
   );
@@ -363,16 +373,37 @@ const DiagnosticPanel: React.FC = () => {
                     The diagnostics features require the FastAPI backend server to be running. 
                     Please ensure it's started and accessible at {apiUrl}.
                   </p>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    onClick={() => checkBackendConnection()}
-                    disabled={isTesting}
-                    className="mt-3 border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/30"
-                  >
-                    {isTesting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-                    Retry Connection
-                  </Button>
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={() => checkBackendConnection()}
+                      disabled={isTesting}
+                      className="border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/30"
+                    >
+                      {isTesting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                      Retry Connection
+                    </Button>
+                    
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      className="border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300"
+                    >
+                      <Terminal className="h-4 w-4 mr-2" />
+                      Start Backend (Coming Soon)
+                    </Button>
+                  </div>
+
+                  <div className="mt-3 text-xs text-red-500 dark:text-red-400">
+                    <strong>Common solutions:</strong>
+                    <ul className="list-disc list-inside mt-1 space-y-1">
+                      <li>Make sure the FastAPI server is running with <code>python -m backend.app.main</code></li>
+                      <li>Check if the server is running on a different port (try 8080 instead of 8000)</li>
+                      <li>Ensure there are no firewalls blocking the connection</li>
+                      <li>Look for any error messages in the backend terminal</li>
+                    </ul>
+                  </div>
                 </div>
               </div>
             </div>
@@ -393,6 +424,27 @@ const DiagnosticPanel: React.FC = () => {
                   {isTesting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                   Update URL
                 </Button>
+              </div>
+              
+              <div className="mt-3 text-xs text-amber-600 dark:text-amber-400">
+                <strong>Try these URLs:</strong>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 mt-1">
+                  {["http://localhost:8000", "http://localhost:8080", "http://127.0.0.1:8000", "http://127.0.0.1:8080"].map((url) => (
+                    <Button 
+                      key={url} 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => {
+                        setApiUrl(url);
+                        localStorage.setItem('diagnostics_api_url', url);
+                        checkBackendConnection();
+                      }}
+                      className="text-xs h-7 border-amber-200 dark:border-amber-800"
+                    >
+                      {url}
+                    </Button>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
@@ -469,6 +521,18 @@ const DiagnosticPanel: React.FC = () => {
                           <span>Unknown format</span>
                         )}
                       </div>
+                      
+                      {backendResult.server_info && (
+                        <>
+                          <div className="font-medium text-muted-foreground">Server:</div>
+                          <div className="flex items-center gap-1">
+                            <span>{backendResult.server_info.api_name || 'Unknown'}</span>
+                            {backendResult.server_info.version && (
+                              <span className="text-xs ml-1 text-muted-foreground">v{backendResult.server_info.version}</span>
+                            )}
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
                   
@@ -477,6 +541,15 @@ const DiagnosticPanel: React.FC = () => {
                       <h4 className="font-medium text-sm mb-2">Response Preview</h4>
                       <pre className="bg-muted p-2 rounded text-xs overflow-auto max-h-40 whitespace-pre-wrap">
                         {backendResult.response_preview}
+                      </pre>
+                    </div>
+                  )}
+                  
+                  {backendResult.debug_info && isDebugMode && (
+                    <div className="p-4 border-t">
+                      <h4 className="font-medium text-sm mb-2">Debug Information</h4>
+                      <pre className="bg-muted p-2 rounded text-xs overflow-auto max-h-40 whitespace-pre-wrap">
+                        {JSON.stringify(backendResult.debug_info, null, 2)}
                       </pre>
                     </div>
                   )}
@@ -495,6 +568,15 @@ const DiagnosticPanel: React.FC = () => {
                             <li>The backend URL is incorrect or pointing to a web server</li>
                             <li>The API endpoint doesn't exist or is returning a web page</li>
                           </ul>
+                          
+                          <div className="mt-3 px-3 py-2 bg-amber-100 dark:bg-amber-900/40 rounded border border-amber-200 dark:border-amber-800 text-sm text-amber-700 dark:text-amber-300">
+                            <strong>Try adding these headers to your requests:</strong>
+                            <pre className="mt-1 text-xs bg-amber-200/50 dark:bg-amber-800/50 p-1 rounded">
+{`"X-API-Request": "true",
+"X-Backend-Request": "true",
+"Accept": "application/json"`}
+                            </pre>
+                          </div>
                         </div>
                       </div>
                     </div>

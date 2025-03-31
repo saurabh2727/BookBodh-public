@@ -1,3 +1,4 @@
+
 export type MessageType = 'user' | 'bot';
 
 export interface Citation {
@@ -97,4 +98,14 @@ export interface BackendTestResult {
   response_size?: number;
   parsed_json?: any;
   additional_paths_tested?: Record<string, any>;
+  server_info?: {
+    version?: string;
+    api_name?: string;
+    environment?: string;
+  };
+  debug_info?: {
+    request_headers?: Record<string, string>;
+    routing_info?: string;
+    attempted_urls?: string[];
+  };
 }
