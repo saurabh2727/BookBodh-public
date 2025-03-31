@@ -1,10 +1,9 @@
-
 # API keys and configuration settings
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
-    # Replace the placeholder with the real Grok API key
-    GROK_API_KEY: str = "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"
+    # Replace the placeholder with the new Grok API key
+    GROK_API_KEY: str = "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"
     
     # Model settings
     DEFAULT_MODEL: str = "llama3-70b-8192"
