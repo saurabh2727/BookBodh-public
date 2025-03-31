@@ -1,4 +1,3 @@
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.38.4";
@@ -338,33 +337,34 @@ serve(async (req) => {
               
               // Log complete response details for debugging
               console.log(`Backend response status: ${backendResponse.status}`);
-              console.log(`Backend response content-type: ${backendResponse.headers.get("content-type")}`);
+              const contentType = backendResponse.headers.get("content-type");
+              console.log(`Backend response content-type: ${contentType}`);
+              
+              // Get the full response text
+              const responseText = await backendResponse.text();
+              console.log(`Backend full response length: ${responseText.length} chars`);
+              console.log(`Backend response preview: ${responseText.substring(0, 500)}...`);
               
               // Check if status is success (2xx)
               if (backendResponse.status >= 200 && backendResponse.status < 300) {
-                // Attempt to get response text first
-                const responseText = await backendResponse.text();
-                console.log(`Backend full response length: ${responseText.length} chars`);
-                console.log(`Backend response preview: ${responseText.substring(0, 200)}...`);
-                
-                // If it looks like JSON, try to parse it
-                let isJson = false;
-                if (responseText.trim().startsWith('{') || responseText.trim().startsWith('[')) {
+                // Check if the content-type is JSON
+                if (contentType && contentType.includes("application/json")) {
                   try {
                     responseData = JSON.parse(responseText);
                     console.log("Backend extraction JSON response:", responseData);
-                    isJson = true;
                     extractionSuccess = true;
                   } catch (jsonError) {
-                    console.log("Response looks like JSON but parsing failed:", jsonError.message);
+                    console.error(`Error parsing JSON response: ${jsonError.message}`);
+                    console.error(`Response was: ${responseText.substring(0, 500)}...`);
+                    extractionError = `JSON parsing error: ${jsonError.message}`;
                   }
-                }
-                
-                if (!isJson) {
-                  console.log("Backend returned HTML response with success status. Contents:");
+                } else {
+                  console.log(`Expected JSON but got ${contentType || "unknown content type"}`);
+                  console.log(`HTML response with success status. First 500 chars:`);
                   console.log(responseText.substring(0, 500) + "...");
                   
                   // Mark as success if we at least got a 200 OK
+                  // This allows the process to continue even if the backend returns HTML
                   extractionSuccess = true;
                   
                   // Update database to indicate extraction is in progress
@@ -380,13 +380,13 @@ serve(async (req) => {
                 break; // Exit the loop on success
               } else {
                 // Log error details
-                const errorText = await backendResponse.text();
-                console.error(`Failed with endpoint ${apiPath}: Status ${backendResponse.status}`, 
-                  errorText.length > 500 ? errorText.substring(0, 500) + "..." : errorText);
+                console.error(`Failed with endpoint ${apiPath}: Status ${backendResponse.status}`);
+                console.error(`Error response: ${responseText.substring(0, 500)}...`);
                 extractionError = `Status ${backendResponse.status} with ${apiPath}`;
               }
             } catch (endpointError) {
               console.error(`Error with endpoint ${apiPath}:`, endpointError);
+              console.error(`Full error details: ${endpointError.stack || "No stack trace"}`);
               extractionError = `${endpointError.message} with ${apiPath}`;
             }
           }
