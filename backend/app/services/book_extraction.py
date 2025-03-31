@@ -240,14 +240,41 @@ class BookExtractor:
             driver_info = capabilities.get('chrome', {}).get('chromedriverVersion', 'unknown')
             logger.info(f"WebDriver info - Browser: {browser_name} {browser_version}, Driver: {driver_info}")
             
+            # Extract external ID from the book record if available
+            external_id = ""
+            try:
+                # Try to get external_id from database
+                from ..database.books import get_book_by_id
+                book_data = get_book_by_id(book_id)
+                if book_data and book_data.get('external_id'):
+                    external_id = book_data['external_id']
+                    logger.info(f"Found external_id in database: {external_id}")
+                    
+                    # If we have an external_id, use it to construct a reliable URL
+                    if external_id:
+                        iframe_url = f"https://www.google.com/books/edition/_/{external_id}?hl=en&gbpv=1"
+                        logger.info(f"Using external_id to construct URL: {iframe_url}")
+                    else:
+                        # Fallback to using the book_id directly (might be the external ID)
+                        iframe_url = f"https://www.google.com/books/edition/_/{book_id}?hl=en&gbpv=1"
+                        logger.info(f"Using book_id as external_id in URL: {iframe_url}")
+                else:
+                    # Fallback to using the book_id directly (might be the external ID)
+                    iframe_url = f"https://www.google.com/books/edition/_/{book_id}?hl=en&gbpv=1"
+                    logger.info(f"No external_id found, using book_id in URL: {iframe_url}")
+            except Exception as db_error:
+                logger.error(f"Error retrieving external_id from database: {str(db_error)}")
+                logger.error(traceback.format_exc())
+                # Fallback to using the book_id directly
+                iframe_url = f"https://www.google.com/books/edition/_/{book_id}?hl=en&gbpv=1"
+                logger.info(f"Using book_id as fallback due to database error: {iframe_url}")
+            
             # Open Google Books Reader with a more reliable URL format
             # Adding book_id check for debugging
             if not book_id or len(book_id) < 4:
                 logger.error(f"Invalid book ID: '{book_id}' - Too short or empty")
                 return f"Invalid book ID: '{book_id}'", []
                 
-            # Try different Google Books URL formats
-            iframe_url = f"https://www.google.com/books/edition/_/{book_id}?hl=en&gbpv=1"
             logger.info(f"Navigating to Google Books URL: {iframe_url}")
             
             try:
@@ -258,7 +285,11 @@ class BookExtractor:
                 logger.error(traceback.format_exc())
                 
                 # Try an alternative URL format
-                alt_url = f"https://books.google.com/books?id={book_id}&printsec=frontcover"
+                if external_id:
+                    alt_url = f"https://books.google.com/books?id={external_id}&printsec=frontcover"
+                else:
+                    alt_url = f"https://books.google.com/books?id={book_id}&printsec=frontcover"
+                    
                 logger.info(f"Trying alternative URL: {alt_url}")
                 driver.get(alt_url)
             

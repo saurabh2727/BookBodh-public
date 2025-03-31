@@ -298,71 +298,107 @@ serve(async (req) => {
           // Get the backend URL from environment or use a default
           const backendUrl = Deno.env.get("BACKEND_API_URL") || "https://ethical-wisdom-bot.lovable.app";
           
-          // Make sure we're using the exact API path format expected by the backend
-          // Add '/api' prefix to ensure we're hitting the API endpoint, not a frontend route
-          const backendExtractionUrl = `${backendUrl}/api/books/extract-book/${addedBookId}`;
+          // Try multiple API path formats to increase chances of success
+          const apiPaths = [
+            `/api/books/extract-book/${addedBookId}`,
+            `/books/extract-book/${addedBookId}`,
+            `/api/extract-book/${addedBookId}`,
+            `/extract-book/${addedBookId}`
+          ];
           
-          console.log(`Calling backend extraction endpoint: ${backendExtractionUrl}`);
+          let extractionSuccess = false;
+          let extractionError = null;
           
-          // Use text/plain Accept header to avoid browser-like HTML responses
-          const backendResponse = await fetch(backendExtractionUrl, {
-            method: "POST",
-            headers: { 
-              "Content-Type": "application/json",
-              "Accept": "application/json, text/plain, */*"
-            },
-            body: JSON.stringify({ book_id: addedBookId }),
-          });
-          
-          // First log the status and headers for debugging
-          console.log(`Backend response status: ${backendResponse.status}`);
-          console.log(`Backend response content-type: ${backendResponse.headers.get("content-type")}`);
-          
-          // Check status code first
-          if (backendResponse.status >= 200 && backendResponse.status < 300) {
-            // Get the raw text first to help with debugging
-            const responseText = await backendResponse.text();
-            console.log(`Backend raw response (first 200 chars): ${responseText.substring(0, 200)}...`);
+          // Try each API path format until one succeeds
+          for (const apiPath of apiPaths) {
+            if (extractionSuccess) break;
             
-            // Try to parse as JSON if it looks like JSON
-            if (responseText.trim().startsWith('{') || responseText.trim().startsWith('[')) {
-              try {
-                const responseData = JSON.parse(responseText);
-                console.log("Backend extraction process started successfully:", responseData);
-              } catch (jsonError) {
-                console.log("Response looks like JSON but couldn't be parsed, treating as success anyway");
+            const backendExtractionUrl = `${backendUrl}${apiPath}`;
+            console.log(`Trying backend extraction endpoint: ${backendExtractionUrl}`);
+            
+            try {
+              // Use proper headers for API request - specify JSON format explicitly
+              const backendResponse = await fetch(backendExtractionUrl, {
+                method: "POST",
+                headers: { 
+                  "Content-Type": "application/json",
+                  "Accept": "application/json",
+                  "User-Agent": "Supabase Edge Function"
+                },
+                body: JSON.stringify({ book_id: addedBookId }),
+              });
+              
+              // Log response details
+              console.log(`Backend response status: ${backendResponse.status}`);
+              console.log(`Backend response content-type: ${backendResponse.headers.get("content-type")}`);
+              
+              // Check if status is success (2xx)
+              if (backendResponse.status >= 200 && backendResponse.status < 300) {
+                extractionSuccess = true;
+                
+                // Attempt to get response text
+                const responseText = await backendResponse.text();
+                console.log(`Backend response (first 200 chars): ${responseText.substring(0, 200)}...`);
+                
+                // If it looks like JSON, try to parse it
+                if (responseText.trim().startsWith('{') || responseText.trim().startsWith('[')) {
+                  try {
+                    const responseData = JSON.parse(responseText);
+                    console.log("Backend extraction process started successfully:", responseData);
+                  } catch (jsonError) {
+                    console.log("Response looks like JSON but couldn't be parsed. This is likely fine as the backend process should have started.");
+                  }
+                } else {
+                  console.log("Backend returned non-JSON response with success status code. The extraction process is likely running in the background.");
+                  
+                  // Update the book status to indicate the extraction is in progress
+                  await supabase
+                    .from('books')
+                    .update({
+                      status: 'extracting',
+                      summary: `Book extraction in progress. This may take a few minutes.`
+                    })
+                    .eq('id', addedBookId);
+                }
+                
+                break; // Exit the loop on success
+              } else {
+                // Log error details
+                const errorText = await backendResponse.text();
+                console.error(`Failed with endpoint ${apiPath}: Status ${backendResponse.status}`, 
+                  errorText.length > 500 ? errorText.substring(0, 500) + "..." : errorText);
+                extractionError = `Status ${backendResponse.status} with ${apiPath}`;
               }
-            } else {
-              console.log("Backend returned non-JSON response, but status code indicates success");
+            } catch (endpointError) {
+              console.error(`Error with endpoint ${apiPath}:`, endpointError);
+              extractionError = `${endpointError.message} with ${apiPath}`;
             }
-          } else {
-            // Error status code
-            const errorText = await backendResponse.text();
-            console.error(`Failed to start backend extraction process: Status ${backendResponse.status}`, 
-              errorText.length > 500 ? errorText.substring(0, 500) + "..." : errorText);
+          }
+          
+          // If none of the endpoints worked, log a comprehensive error
+          if (!extractionSuccess) {
+            console.error("All backend extraction endpoints failed:", extractionError);
             
-            // Try alternative API path format as fallback
-            console.log("Trying alternative API path format as fallback...");
-            const alternativeUrl = `${backendUrl}/books/extract-book/${addedBookId}`;
-            console.log(`Calling alternative endpoint: ${alternativeUrl}`);
-            
-            const alternativeResponse = await fetch(alternativeUrl, {
-              method: "POST",
-              headers: { 
-                "Content-Type": "application/json",
-                "Accept": "application/json, text/plain, */*"
-              },
-              body: JSON.stringify({ book_id: addedBookId }),
-            });
-            
-            if (alternativeResponse.status >= 200 && alternativeResponse.status < 300) {
-              console.log(`Alternative endpoint succeeded with status: ${alternativeResponse.status}`);
-            } else {
-              console.error(`Alternative endpoint also failed with status: ${alternativeResponse.status}`);
-            }
+            // Update book status to indicate extraction issue but with content still available
+            await supabase
+              .from('books')
+              .update({
+                status: 'basic_extraction_only',
+                summary: `Basic information extracted. Full book preview extraction failed, but the book is still usable.`
+              })
+              .eq('id', addedBookId);
           }
         } catch (backendError) {
           console.error("Error triggering backend extraction:", backendError);
+          
+          // Update book status to indicate extraction issue
+          await supabase
+            .from('books')
+            .update({
+              status: 'basic_extraction_only',
+              summary: `Basic information extracted. Full book preview extraction failed with error: ${backendError.message}`
+            })
+            .eq('id', addedBookId);
         }
       })());
       
