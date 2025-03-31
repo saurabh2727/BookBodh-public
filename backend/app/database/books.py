@@ -1,10 +1,10 @@
-
 from typing import Dict, List, Optional
 import re
 import uuid
 import os
 import json
 import logging
+from sqlalchemy.orm import Session
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -431,3 +431,31 @@ Aurelius consistently returns to the importance of accepting what cannot be chan
         except Exception as e:
             logger.error(f"Error updating book: {e}", exc_info=True)
             return False
+
+def create_book_chunk(db: Session, book_id: str, chunk_index: int, text: str, title: str, author: str = None):
+    """
+    Create a new book chunk in the database
+    """
+    from app.database.models import BookChunk
+    
+    try:
+        # Create a summary from the first ~100 characters of the chunk
+        summary = text[:100] + ("..." if len(text) > 100 else "")
+        
+        chunk = BookChunk(
+            book_id=book_id,
+            chunk_index=chunk_index,
+            text=text,
+            title=title,
+            author=author,
+            summary=summary
+        )
+        
+        db.add(chunk)
+        db.commit()
+        db.refresh(chunk)
+        return chunk
+    except Exception as e:
+        db.rollback()
+        logging.error(f"Error creating book chunk: {str(e)}")
+        return None

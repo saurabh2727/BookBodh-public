@@ -436,6 +436,8 @@ async function triggerExtraction(bookId: string) {
     const apiUrl = Deno.env.get("BACKEND_API_URL") || "https://ethical-wisdom-bot.lovable.app";
     const extractionUrl = `${apiUrl}/extract-book/${bookId}`;
     
+    console.log(`Calling extraction endpoint: ${extractionUrl}`);
+    
     const response = await fetch(extractionUrl, {
       method: "POST",
       headers: {
@@ -445,7 +447,8 @@ async function triggerExtraction(bookId: string) {
     });
     
     if (response.ok) {
-      console.log(`Extraction initiated successfully for book ${bookId}`);
+      const result = await response.json();
+      console.log(`Extraction initiated successfully for book ${bookId}`, result);
       return true;
     } else {
       console.error(`Failed to initiate extraction for book ${bookId}: ${await response.text()}`);
