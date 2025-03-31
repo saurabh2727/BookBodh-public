@@ -446,12 +446,28 @@ async function triggerExtraction(bookId: string) {
       body: JSON.stringify({ book_id: bookId }),
     });
     
-    if (response.ok) {
-      const result = await response.json();
-      console.log(`Extraction initiated successfully for book ${bookId}`, result);
+    // Check if the response is ok based on status code, not expecting JSON
+    if (response.status >= 200 && response.status < 300) {
+      // Check if the response is JSON before trying to parse it
+      const contentType = response.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
+        try {
+          const result = await response.json();
+          console.log(`Extraction initiated successfully for book ${bookId}`, result);
+        } catch (jsonError) {
+          // If JSON parsing fails, still consider it a success but log the raw response
+          console.log(`Extraction likely initiated for book ${bookId}. Raw response:`, await response.text());
+        }
+      } else {
+        // Not JSON but successful status code
+        console.log(`Extraction initiated for book ${bookId}. Non-JSON response:`, await response.text());
+      }
       return true;
     } else {
-      console.error(`Failed to initiate extraction for book ${bookId}: ${await response.text()}`);
+      // Error status code
+      const errorText = await response.text();
+      console.error(`Failed to initiate extraction for book ${bookId}: Status ${response.status}`, 
+        errorText.length > 500 ? errorText.substring(0, 500) + "..." : errorText);
       return false;
     }
   } catch (error) {

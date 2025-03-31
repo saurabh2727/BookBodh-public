@@ -291,7 +291,7 @@ serve(async (req) => {
         const extractionResult = await extractFromGoogleBooks(addedBookId, originalBookId);
         console.log(`Local extraction completed with result:`, extractionResult);
         
-        // Update backend extraction call to use the correct URL format
+        // Trigger the backend extraction with better error handling
         try {
           console.log("Triggering backend extraction process for more comprehensive results");
           
@@ -309,12 +309,29 @@ serve(async (req) => {
             body: JSON.stringify({ book_id: addedBookId }),
           });
           
-          if (backendResponse.ok) {
-            const responseData = await backendResponse.json();
-            console.log("Backend extraction process started successfully:", responseData);
+          // Check status code first
+          if (backendResponse.status >= 200 && backendResponse.status < 300) {
+            // Only try to parse as JSON if content-type is application/json
+            const contentType = backendResponse.headers.get("content-type");
+            if (contentType && contentType.includes("application/json")) {
+              try {
+                const responseData = await backendResponse.json();
+                console.log("Backend extraction process started successfully:", responseData);
+              } catch (jsonError) {
+                console.error("Error parsing JSON response:", jsonError);
+                console.log("Raw response:", await backendResponse.text());
+              }
+            } else {
+              // Not JSON, log as text
+              const textResponse = await backendResponse.text();
+              console.log("Backend extraction started. Non-JSON response:", 
+                textResponse.length > 500 ? textResponse.substring(0, 500) + "..." : textResponse);
+            }
           } else {
+            // Error status code
             const errorText = await backendResponse.text();
-            console.error(`Failed to start backend extraction process: Status ${backendResponse.status}`, errorText);
+            console.error(`Failed to start backend extraction process: Status ${backendResponse.status}`, 
+              errorText.length > 500 ? errorText.substring(0, 500) + "..." : errorText);
           }
         } catch (backendError) {
           console.error("Error triggering backend extraction:", backendError);
