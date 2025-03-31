@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -26,6 +25,9 @@ interface BackendTestResult {
   is_html: boolean;
   message: string;
   suggested_backend_url?: string | null;
+  response_preview?: string | null;
+  response_size?: number;
+  parsed_json?: any;
 }
 
 const DiagnosticPanel: React.FC = () => {
@@ -45,7 +47,6 @@ const DiagnosticPanel: React.FC = () => {
       setIsTesting(true);
       console.log(`Testing backend connection to ${apiUrl}`);
       
-      // Use the Supabase edge function for proper testing
       const { data, error } = await supabase.functions.invoke('test-backend-api', {
         body: { 
           url: apiUrl,
@@ -68,10 +69,8 @@ const DiagnosticPanel: React.FC = () => {
         return false;
       }
       
-      // Store the detailed test result
       setBackendResult(data);
       
-      // Set connection status based on the test result
       setIsBackendConnected(data.success);
       
       if (data.success) {
@@ -82,7 +81,6 @@ const DiagnosticPanel: React.FC = () => {
           });
         }
         
-        // If we got a suggestion for a better backend URL, show it
         if (data.suggested_backend_url && data.suggested_backend_url !== apiUrl) {
           sonnerToast.info(
             `A different backend URL might work better: ${data.suggested_backend_url}`, 
@@ -109,7 +107,6 @@ const DiagnosticPanel: React.FC = () => {
             description: data.message || "Could not connect to backend service",
           });
           
-          // If we received HTML instead of JSON, show a special toast
           if (data.is_html) {
             sonnerToast.error(
               "Received HTML instead of JSON response", 
@@ -121,7 +118,6 @@ const DiagnosticPanel: React.FC = () => {
           }
         }
         
-        // If we got a suggestion for a better backend URL, show it
         if (data.suggested_backend_url && data.suggested_backend_url !== apiUrl) {
           sonnerToast.info(
             `A different backend URL might work better: ${data.suggested_backend_url}`, 
@@ -163,7 +159,6 @@ const DiagnosticPanel: React.FC = () => {
   const fetchDiagnosticData = async (endpoint: string) => {
     setIsLoading(true);
     
-    // Check backend connection first
     const isConnected = await checkBackendConnection(false);
     
     if (!isConnected) {
@@ -241,7 +236,6 @@ const DiagnosticPanel: React.FC = () => {
       return;
     }
     
-    // Check backend connection first
     const isConnected = await checkBackendConnection(false);
     
     if (!isConnected) {
@@ -315,13 +309,11 @@ const DiagnosticPanel: React.FC = () => {
   };
 
   useEffect(() => {
-    // Try to get API URL from localStorage first
     const savedApiUrl = localStorage.getItem('diagnostics_api_url');
     if (savedApiUrl) {
       setApiUrl(savedApiUrl);
     }
     
-    // Check if backend is running
     checkBackendConnection(false);
   }, []);
 
@@ -704,7 +696,6 @@ const DiagnosticPanel: React.FC = () => {
                     ))}
                   </div>
                 ) : (
-                  // Handle all other responses including error conditions
                   <div className="space-y-4">
                     {response.status === 'error' ? (
                       <div className="p-6 border border-red-200 bg-red-50 dark:bg-red-900/20 dark:border-red-800 rounded-md">
@@ -728,7 +719,6 @@ const DiagnosticPanel: React.FC = () => {
                         </div>
                       </div>
                     ) : (
-                      // Render the specific tab content from above or a generic response viewer
                       activeTab === 'books' && response.books ? (
                         <div className="space-y-4">
                           <div className="flex items-center">
@@ -780,14 +770,12 @@ const DiagnosticPanel: React.FC = () => {
                           )}
                         </div>
                       ) : (
-                        // Default response display
                         <pre className="text-xs bg-gray-100 dark:bg-gray-800 p-3 rounded overflow-auto">
                           {JSON.stringify(response, null, 2)}
                         </pre>
                       )
                     )}
                     
-                    {/* Debug view - shows raw JSON response */}
                     <details className="mt-4 pt-4 border-t">
                       <summary className="cursor-pointer text-sm font-medium">Raw Response Data</summary>
                       <pre className="mt-2 p-2 text-xs bg-gray-100 dark:bg-gray-800 rounded overflow-auto max-h-40">

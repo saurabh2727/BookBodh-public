@@ -1,4 +1,3 @@
-
 export type MessageType = 'user' | 'bot';
 
 export interface Citation {
@@ -81,4 +80,21 @@ export interface ExtractionStatus {
   screenshots_count: number;
   text_length: number;
   error?: string;
+}
+
+export interface BackendTestResult {
+  success: boolean;
+  backend_url: string;
+  path?: string;
+  full_url: string;
+  response_status: number | null;
+  content_type: string | null;
+  is_json: boolean;
+  is_html: boolean;
+  message: string;
+  suggested_backend_url?: string | null;
+  response_preview?: string | null;
+  response_size?: number;
+  parsed_json?: any;
+  additional_paths_tested?: Record<string, any>;
 }
