@@ -263,16 +263,21 @@ function generateResponse(query: string, chunks: any[], book: string | null, aut
 
 // Main function to process chat requests
 serve(async (req) => {
+  console.log("Edge function invoked: chat-response");
+  
   // Handle CORS preflight request
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
 
   try {
+    console.log("Processing request...");
+    
     // Create Supabase client using auth from header
     const authHeader = req.headers.get('Authorization');
     
     if (!authHeader) {
+      console.log("No authorization header provided");
       return new Response(
         JSON.stringify({ error: 'No authorization header provided' }),
         {
@@ -309,6 +314,7 @@ serve(async (req) => {
     });
 
     if (!query || query.trim() === '') {
+      console.log("Query is required but was empty");
       return new Response(
         JSON.stringify({ error: 'Query is required' }),
         {

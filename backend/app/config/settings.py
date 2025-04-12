@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # Groq API key
-    GROK_API_KEY: str = "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"
+    GROQ_API_KEY: str = "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"
     
     # Model settings
     DEFAULT_MODEL: str = "llama3-70b-8192"

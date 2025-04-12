@@ -54,6 +54,8 @@ const ChatControls: React.FC<ChatControlsProps> = ({
   }, [selectedBookId, selectedBookTitle, toast]);
 
   const handleStartChat = () => {
+    console.log("Starting chat with:", { selectedBookId, selectedBookTitle });
+    
     if (selectedBookId && selectedBookTitle) {
       // Reset the start chat button visibility
       setShowStartChat(false);
@@ -61,12 +63,14 @@ const ChatControls: React.FC<ChatControlsProps> = ({
       // Use a default question to start the chat
       const defaultQuestion = `Tell me about the main ideas in ${selectedBookTitle}`;
       setInputValue(defaultQuestion);
+      console.log("Submitting default question:", defaultQuestion);
       onSubmit(defaultQuestion);
     } else {
       // Start general chat
       setShowStartChat(false);
       const defaultQuestion = "Hello, what can you help me with today?";
       setInputValue(defaultQuestion);
+      console.log("Submitting general question:", defaultQuestion);
       onSubmit(defaultQuestion);
     }
   };
@@ -87,7 +91,10 @@ const ChatControls: React.FC<ChatControlsProps> = ({
       ) : null}
       
       <QueryInput 
-        onSubmit={onSubmit} 
+        onSubmit={(query) => {
+          console.log("Submitting query:", query);
+          onSubmit(query);
+        }} 
         isLoading={isLoading} 
         suggestions={dynamicSuggestions}
         disabled={isLoading}

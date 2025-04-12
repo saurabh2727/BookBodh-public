@@ -110,7 +110,7 @@ DO NOT include HTML tags in your response."""
     # Call Groq API
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {settings.GROK_API_KEY}"
+        "Authorization": f"Bearer {settings.GROQ_API_KEY}"
     }
     
     payload = {
@@ -125,7 +125,7 @@ DO NOT include HTML tags in your response."""
     
     try:
         logger.info(f"Calling Groq API with model: {settings.DEFAULT_MODEL}")
-        logger.info(f"Using Groq API key: {settings.GROK_API_KEY[:8]}... (first 8 chars)")
+        logger.info(f"Using Groq API key: {settings.GROQ_API_KEY[:8]}... (first 8 chars)")
         logger.debug(f"Payload: {json.dumps(payload)[:500]}...")
         
         response = requests.post(
