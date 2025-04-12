@@ -117,7 +117,7 @@ def extract_book_content_handler(book_id: str, data: Dict[str, Any], db):
         )
         
         # Create database entries for the chunks
-        from app.database.books import create_book_chunk
+        from app.database.book_chunks import create_book_chunk
         chunk_records = []
         for chunk in chunks:
             chunk_record = create_book_chunk(
