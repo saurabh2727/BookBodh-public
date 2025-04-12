@@ -46,11 +46,11 @@ class BookCache:
         try:
             # Format data for saving
             data = {
-                "books": {book_data.get("id", str(id)): {
+                "books": {book_data.get("id", book_id): {
                     "title": title,
                     "author": book_data["author"],
                     "content": book_data["content"]
-                } for title, book_data in books.items()},
+                } for book_id, (title, book_data) in enumerate(books.items())},
                 "chunks": chunks
             }
             

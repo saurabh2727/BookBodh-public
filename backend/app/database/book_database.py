@@ -1,4 +1,3 @@
-
 import uuid
 import logging
 import re
@@ -165,51 +164,55 @@ Aurelius consistently returns to the importance of accepting what cannot be chan
         Returns:
             Book ID
         """
-        # Generate a book ID
-        book_id = str(uuid.uuid4())
-        
-        # Check if book already exists
-        if title in self.books:
-            title = f"{title} ({uuid.uuid4().hex[:8]})"
-        
-        # Add book to database
-        self.books[title] = {
-            "id": book_id,
-            "author": author,
-            "content": content
-        }
-        
-        # Process new book into chunks
-        chunk_size = 300  # Same as in _process_books
-        
-        # Clean text
-        content = re.sub(r'\s+', ' ', content).strip()
-        
-        # Split into words
-        words = content.split()
-        
-        # Get next chunk ID
-        chunk_id = len(self.chunks)
-        
-        # Create chunks with overlap
-        overlap = 50  # Words overlap between chunks
-        for i in range(0, len(words), chunk_size - overlap):
-            chunk_words = words[i:i+chunk_size]
-            if chunk_words:
-                chunk_text = ' '.join(chunk_words)
-                self.chunks.append({
-                    "id": chunk_id,
-                    "book_id": book_id,
-                    "title": title,
-                    "author": author,
-                    "text": chunk_text
-                })
-                chunk_id += 1
-        
-        # Attempt to save books to cache
-        self.cache.save_books_cache(self.books, self.chunks)
-        
-        return book_id
+        try:
+            # Generate a book ID
+            book_id = str(uuid.uuid4())
+            
+            # Check if book already exists
+            if title in self.books:
+                title = f"{title} ({uuid.uuid4().hex[:8]})"
+            
+            # Add book to database
+            self.books[title] = {
+                "id": book_id,
+                "author": author,
+                "content": content
+            }
+            
+            # Process new book into chunks
+            chunk_size = 300  # Same as in _process_books
+            
+            # Clean text
+            content = re.sub(r'\s+', ' ', content).strip()
+            
+            # Split into words
+            words = content.split()
+            
+            # Get next chunk ID
+            chunk_id = len(self.chunks)
+            
+            # Create chunks with overlap
+            overlap = 50  # Words overlap between chunks
+            for i in range(0, len(words), chunk_size - overlap):
+                chunk_words = words[i:i+chunk_size]
+                if chunk_words:
+                    chunk_text = ' '.join(chunk_words)
+                    self.chunks.append({
+                        "id": chunk_id,
+                        "book_id": book_id,
+                        "title": title,
+                        "author": author,
+                        "text": chunk_text
+                    })
+                    chunk_id += 1
+            
+            # Attempt to save books to cache
+            self.cache.save_books_cache(self.books, self.chunks)
+            
+            return book_id
+        except Exception as e:
+            logger.error(f"Error adding book: {e}", exc_info=True)
+            raise
     
     def add_chunk(self, book_id: str, chunk_index: int, title: str, text: str, author: str = "Unknown") -> int:
         """

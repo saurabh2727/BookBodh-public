@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { ChatMessage } from '../types';
@@ -65,11 +66,14 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
                     window.clearInterval(pollingTimer!);
                     pollingTimer = null;
                     
+                    // Make sure we have a book title to display
+                    const bookTitle = selectedBook || updatedChunks[0]?.title || 'this book';
+                    
                     setMessages(prev => [
                       ...prev.filter(msg => !msg.isExtractionComplete && !msg.isExtractionStatus),
                       {
                         id: uuidv4(),
-                        content: `Book content has been processed successfully. I'm ready to answer your questions about "${selectedBook}".`,
+                        content: `Book content has been processed successfully. I'm ready to answer your questions about "${bookTitle}".`,
                         type: 'bot',
                         timestamp: new Date(),
                         isSystemMessage: true,
@@ -125,12 +129,15 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
             
             setExtractionInProgress(false);
             
+            // Make sure we have a book title to display
+            const bookTitle = selectedBook || chunks[0]?.title || 'this book';
+            
             if (messages.length <= 1 || messages[messages.length - 1].type === 'user') {
               setMessages(prev => [
                 ...prev.filter(msg => !msg.isBookWelcome),
                 {
                   id: uuidv4(),
-                  content: `I'm ready to help you with "${selectedBook}". What would you like to know about this book?`,
+                  content: `I'm ready to help you with "${bookTitle}". What would you like to know about this book?`,
                   type: 'bot',
                   timestamp: new Date(),
                   isBookWelcome: true
@@ -228,13 +235,16 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
         ]);
       }
       
+      // For request payload, ensure we have fallbacks for book title
+      const bookTitle = selectedBook || (bookChunks.length > 0 ? bookChunks[0].title : null);
+      
       const requestPayload = {
         query,
-        book: selectedBook,
+        book: bookTitle,
         bookId: selectedBookId,
         chunks: bookChunks.length > 0 
           ? bookChunks.map(chunk => ({
-              title: chunk.title || selectedBook || 'Unknown',
+              title: chunk.title || bookTitle || 'Unknown',
               author: chunk.author || 'Unknown',
               text: chunk.text || '',
               summary: chunk.summary || chunk.text?.substring(0, 200) || '',
@@ -253,6 +263,7 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
       const response = await sendChatRequest(requestPayload);
 
       const embedUrl = response.embedUrl;
+      const responseBookTitle = response.book || bookTitle;
 
       if (extractionInProgress && selectedBookId) {
         try {
@@ -289,10 +300,10 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
                 content: response.response,
                 type: 'bot',
                 timestamp: new Date(),
-                citations: response.book
+                citations: responseBookTitle
                   ? [
                       {
-                        book: response.book,
+                        book: responseBookTitle,
                         author: response.author || 'Unknown',
                         page: 1,
                       },
