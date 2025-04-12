@@ -97,7 +97,7 @@ def generate_response(query: str, chunks: List[Dict]) -> Dict:
         if preview_url and preview_url not in preview_urls:
             preview_urls.append(preview_url)
     
-    # Create prompt for Grok
+    # Create prompt for Groq LLM
     prompt = f"""Answer the query: '{query}' using this context: 
     
 {context}
@@ -107,7 +107,7 @@ If the answer cannot be found in the provided context, indicate that clearly.
 Provide a thoughtful, well-reasoned response with quotations from the book where appropriate.
 DO NOT include HTML tags in your response."""
     
-    # Call Grok API
+    # Call Groq API
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {settings.GROK_API_KEY}"
@@ -124,20 +124,29 @@ DO NOT include HTML tags in your response."""
     }
     
     try:
-        logger.info(f"Calling Grok API with payload: {json.dumps(payload)[:500]}...")
+        logger.info(f"Calling Groq API with model: {settings.DEFAULT_MODEL}")
+        logger.debug(f"Payload: {json.dumps(payload)[:500]}...")
         
         response = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers=headers,
-            data=json.dumps(payload)
+            data=json.dumps(payload),
+            timeout=30  # Add a timeout to prevent hanging
         )
         
-        logger.info(f"Grok API status code: {response.status_code}")
-        logger.info(f"Grok API response: {response.text}")
+        logger.info(f"Groq API status code: {response.status_code}")
         
-        response.raise_for_status()
+        # Handle non-successful responses
+        if response.status_code != 200:
+            logger.error(f"Groq API error: Status {response.status_code}, Response: {response.text}")
+            return {
+                "response": f"I encountered an issue processing your request. The Groq API returned status code {response.status_code}. Please try again later.",
+                "book": None,
+                "author": None,
+                "error": f"Groq API returned status {response.status_code}"
+            }
         
-        # Extract response from Grok
+        # Parse successful response
         result = response.json()
         response_text = result["choices"][0]["message"]["content"]
         
@@ -166,11 +175,30 @@ DO NOT include HTML tags in your response."""
             "author": cited_author
         }
         
+    except requests.exceptions.Timeout:
+        logger.error("Timeout while calling Groq API")
+        return {
+            "response": "I'm sorry, the request to generate a response timed out. Please try again with a simpler query.",
+            "book": None,
+            "author": None,
+            "error": "API timeout"
+        }
+    except requests.exceptions.RequestException as e:
+        # Handle network errors, connection issues, etc.
+        logger.error(f"Request exception while calling Groq API: {str(e)}")
+        return {
+            "response": f"I'm sorry, I encountered a network issue while processing your request. Error: {str(e)}",
+            "book": None,
+            "author": None,
+            "error": f"Request error: {str(e)}"
+        }
     except Exception as e:
-        # In case of API failure, return a graceful error message
-        logger.error(f"Grok API error: {str(e)}")
+        # General error handling
+        logger.error(f"Groq API error: {str(e)}")
+        logger.error(f"Error details:", exc_info=True)
         return {
             "response": f"I'm sorry, I encountered an issue while processing your request. Error: {str(e)}",
             "book": None,
-            "author": None
+            "author": None,
+            "error": f"Error processing request: {str(e)}"
         }

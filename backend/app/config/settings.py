@@ -3,7 +3,7 @@
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
-    # Replace the placeholder with the new Grok API key
+    # Groq API key (not Grok - that was the naming mistake)
     GROK_API_KEY: str = "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"
     
     # Model settings

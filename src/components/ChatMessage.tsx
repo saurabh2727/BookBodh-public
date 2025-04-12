@@ -30,6 +30,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
       /book preview: (https:\/\/[^\s]+)/i,
       /preview available at: (https:\/\/[^\s]+)/i,
       /google books: (https:\/\/[^\s]+)/i,
+      /you can preview this book at: (https:\/\/[^\s]+)/i,
       /books\.google\.com\/books\?id=([a-zA-Z0-9_-]+)/i
     ];
     
