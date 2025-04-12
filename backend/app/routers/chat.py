@@ -70,8 +70,11 @@ async def chat(request: ChatRequest):
         # For general chat without a book selected
         if not request.book and not request.bookId and not request.chunks:
             logger.info("Processing general chat without book context")
+            # Always use Groq for responses, even for general chats
+            empty_chunks = []
+            response = generate_response(request.query, empty_chunks)
             return ChatResponse(
-                response=f"I'm BookBodh, your AI assistant. {request.query}",
+                response=response["response"],
                 book=None,
                 author=None
             )
@@ -91,10 +94,12 @@ async def chat(request: ChatRequest):
                 logger.info(f"Retrieved {len(chunks) if chunks else 0} chunks")
             
             if not chunks:
-                # If no relevant chunks found, return a helpful message
+                # If no relevant chunks found, still use Groq but with empty context
                 logger.info("No relevant chunks found for the query")
+                empty_chunks = []
+                response = generate_response(request.query, empty_chunks)
                 return ChatResponse(
-                    response="I couldn't find any relevant information in this book. Please try a different question or book selection.",
+                    response=response["response"],
                     book=None,
                     author=None
                 )

@@ -68,7 +68,7 @@ def extract_book_preview_url(text: str) -> Optional[str]:
 
 def generate_response(query: str, chunks: List[Dict]) -> Dict:
     """
-    Generate a response using the Grok API based on the query and retrieved chunks
+    Generate a response using the Groq API based on the query and retrieved chunks
     
     Args:
         query: The user's question
@@ -89,8 +89,8 @@ def generate_response(query: str, chunks: List[Dict]) -> Dict:
     for i, chunk in enumerate(chunks):
         # Clean any HTML in the chunk text
         clean_text = sanitize_html(chunk['text']) if 'text' in chunk else ""
-        context += f"\nChunk {i+1} from '{chunk['title']}' by {chunk['author']}:\n{clean_text}\n"
-        book_citations[chunk['title']] = chunk['author']
+        context += f"\nChunk {i+1} from '{chunk.get('title', 'Unknown')}' by {chunk.get('author', 'Unknown')}:\n{clean_text}\n"
+        book_citations[chunk.get('title', 'Unknown')] = chunk.get('author', 'Unknown')
         
         # Check if this chunk contains a book preview URL
         preview_url = extract_book_preview_url(clean_text)
@@ -125,6 +125,7 @@ DO NOT include HTML tags in your response."""
     
     try:
         logger.info(f"Calling Groq API with model: {settings.DEFAULT_MODEL}")
+        logger.info(f"Using Groq API key: {settings.GROK_API_KEY[:8]}... (first 8 chars)")
         logger.debug(f"Payload: {json.dumps(payload)[:500]}...")
         
         response = requests.post(

@@ -31,7 +31,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
       /preview available at: (https:\/\/[^\s]+)/i,
       /google books: (https:\/\/[^\s]+)/i,
       /you can preview this book at: (https:\/\/[^\s]+)/i,
-      /books\.google\.com\/books\?id=([a-zA-Z0-9_-]+)/i
+      /books\.google\.com\/books\?id=([a-zA-Z0-9_-]+)/i,
+      /play\.google\.com\/books\/reader\?id=([a-zA-Z0-9_-]+)/i
     ];
     
     for (const pattern of patterns) {
@@ -39,6 +40,10 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
       if (match) {
         if (pattern.toString().includes('id=')) {
           // This is the ID pattern
+          const bookId = match[1];
+          return `https://books.google.com/books?id=${bookId}&lpg=PP1&pg=PP1&output=embed`;
+        } else if (pattern.toString().includes('reader?id=')) {
+          // This is the play.google.com pattern
           const bookId = match[1];
           return `https://books.google.com/books?id=${bookId}&lpg=PP1&pg=PP1&output=embed`;
         } else {
@@ -87,6 +92,16 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
   
   const embedUrl = extractEmbedUrl();
   const cleanContent = getCleanContent();
+
+  console.log("Message data:", {
+    id: message.id,
+    type: message.type,
+    content: message.content?.substring(0, 50),
+    hasEmbedUrl: hasEmbedUrl,
+    embedUrl: message.embedUrl,
+    extractedEmbedUrl: embedUrl,
+    citations: message.citations
+  });
 
   return (
     <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} mb-4`}>
