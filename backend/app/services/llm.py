@@ -4,6 +4,7 @@ import json
 import logging
 import html
 import re
+import time
 from typing import Dict, List, Optional, Tuple
 from app.config.settings import settings
 
@@ -82,9 +83,12 @@ def generate_response(query: str, chunks: List[Dict]) -> Dict:
     book_citations = {}
     preview_urls = []
     
-    # Log input data
+    # Log input data with detailed debug information
     logger.info(f"Generating response for query: '{query}'")
     logger.info(f"Using {len(chunks)} chunks for context")
+    logger.info(f"GROQ_API_KEY is {'set' if settings.GROQ_API_KEY else 'NOT set'}")
+    if settings.GROQ_API_KEY:
+        logger.info(f"GROQ_API_KEY first 10 chars: {settings.GROQ_API_KEY[:10]}")
     
     for i, chunk in enumerate(chunks):
         # Clean any HTML in the chunk text
@@ -126,7 +130,11 @@ DO NOT include HTML tags in your response."""
     try:
         logger.info(f"Calling Groq API with model: {settings.DEFAULT_MODEL}")
         logger.info(f"Using Groq API key: {settings.GROQ_API_KEY[:8]}... (first 8 chars)")
+        logger.info(f"API Endpoint: https://api.groq.com/openai/v1/chat/completions")
         logger.debug(f"Payload: {json.dumps(payload)[:500]}...")
+        
+        # Add timestamp for request tracking
+        start_time = time.time()
         
         response = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
@@ -135,7 +143,13 @@ DO NOT include HTML tags in your response."""
             timeout=30  # Add a timeout to prevent hanging
         )
         
+        elapsed_time = time.time() - start_time
+        logger.info(f"Groq API response time: {elapsed_time:.2f} seconds")
         logger.info(f"Groq API status code: {response.status_code}")
+        
+        # Log the full response in debug mode
+        if settings.debug:
+            logger.debug(f"Groq API raw response: {response.text[:1000]}")
         
         # Handle non-successful responses
         if response.status_code != 200:
@@ -144,7 +158,7 @@ DO NOT include HTML tags in your response."""
                 "response": f"I encountered an issue processing your request. The Groq API returned status code {response.status_code}. Please try again later.",
                 "book": None,
                 "author": None,
-                "error": f"Groq API returned status {response.status_code}"
+                "error": f"Groq API returned status {response.status_code}: {response.text}"
             }
         
         # Parse successful response

@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     # Debug mode
     debug: bool = True
     
+    # Backend API URL for Supabase Edge Functions
+    BACKEND_API_URL: str = "http://localhost:8000"
+    
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

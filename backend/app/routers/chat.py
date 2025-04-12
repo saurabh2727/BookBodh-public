@@ -67,23 +67,12 @@ async def chat(request: ChatRequest):
     logger.info(f"Chat endpoint called with query: '{request.query}' for book: {request.book or request.bookId or 'None'}")
     
     try:
-        # For general chat without a book selected
-        if not request.book and not request.bookId and not request.chunks:
-            logger.info("Processing general chat without book context")
-            # Always use Groq for responses, even for general chats
-            empty_chunks = []
-            response = generate_response(request.query, empty_chunks)
-            return ChatResponse(
-                response=response["response"],
-                book=None,
-                author=None
-            )
-            
-        # If a book is specified, use book-specific logic
-        if request.book or request.bookId or request.chunks:
-            logger.info(f"Processing book-specific chat. Book: {request.book}, Book ID: {request.bookId}, Chunks provided: {bool(request.chunks)}")
-            
-            # Use provided chunks if available, otherwise retrieve them
+        # For general chat without a book selected, still use Groq with empty context
+        logger.info("Processing chat request, retrieving chunks if needed")
+        chunks = []
+        
+        # If a book is specified, retrieve relevant chunks
+        if request.book or request.bookId:
             if request.chunks:
                 logger.info(f"Using {len(request.chunks)} provided chunks")
                 chunks = request.chunks
@@ -92,29 +81,18 @@ async def chat(request: ChatRequest):
                 logger.info(f"Retrieving chunks for query: '{request.query}'")
                 chunks = retrieve_chunks(request.query, request.book, request.bookId)
                 logger.info(f"Retrieved {len(chunks) if chunks else 0} chunks")
-            
-            if not chunks:
-                # If no relevant chunks found, still use Groq but with empty context
-                logger.info("No relevant chunks found for the query")
-                empty_chunks = []
-                response = generate_response(request.query, empty_chunks)
-                return ChatResponse(
-                    response=response["response"],
-                    book=None,
-                    author=None
-                )
-            
-            # Generate response using LLM
-            logger.info(f"Generating response using LLM with {len(chunks)} chunks")
-            llm_response = generate_response(request.query, chunks)
-            logger.info(f"LLM response generated with {len(llm_response['response']) if llm_response.get('response') else 0} characters")
-            
-            # Return formatted response
-            return ChatResponse(
-                response=llm_response["response"],
-                book=llm_response["book"],
-                author=llm_response["author"]
-            )
+        
+        # Generate response using LLM - ALWAYS use Groq, even for general chats
+        logger.info(f"Generating response using Groq LLM with {len(chunks)} chunks")
+        llm_response = generate_response(request.query, chunks)
+        logger.info(f"LLM response generated with {len(llm_response['response']) if llm_response.get('response') else 0} characters")
+        
+        # Return formatted response
+        return ChatResponse(
+            response=llm_response["response"],
+            book=llm_response["book"],
+            author=llm_response["author"]
+        )
         
     except Exception as e:
         logger.error(f"Error processing chat request: {str(e)}", exc_info=True)
