@@ -67,7 +67,7 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
                     pollingTimer = null;
                     
                     // Make sure we have a book title to display
-                    const bookTitle = selectedBook || updatedChunks[0]?.title || 'this book';
+                    const bookTitle = selectedBook || (updatedChunks[0]?.title) || 'this book';
                     
                     setMessages(prev => [
                       ...prev.filter(msg => !msg.isExtractionComplete && !msg.isExtractionStatus),
@@ -130,7 +130,7 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
             setExtractionInProgress(false);
             
             // Make sure we have a book title to display
-            const bookTitle = selectedBook || chunks[0]?.title || 'this book';
+            const bookTitle = selectedBook || (chunks[0]?.title) || 'this book';
             
             if (messages.length <= 1 || messages[messages.length - 1].type === 'user') {
               setMessages(prev => [

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -57,7 +56,6 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
     checkAuth();
   }, []);
 
-  // Poll for book extraction status
   useEffect(() => {
     let pollingInterval: number | null = null;
     
@@ -88,12 +86,10 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
                 variant: "default",
               });
               
-              // Update success message
               if (uploadSuccess && selectedBook) {
                 onUploadComplete(true, `Book "${selectedBook.volumeInfo.title}" added and processed successfully with ${data.chunks_count} chunks`, bookId);
               }
               
-              // Clear the interval
               if (pollingInterval) {
                 window.clearInterval(pollingInterval);
                 pollingInterval = null;
@@ -108,7 +104,6 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
                 variant: "destructive",
               });
               
-              // Clear the interval
               if (pollingInterval) {
                 window.clearInterval(pollingInterval);
                 pollingInterval = null;
@@ -157,12 +152,27 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
       
       if (!isAuthenticated) {
         console.log('BookUpload: Attempting to refresh auth before search...');
-        const isValid = await ensureAuthIsValid();
-        
-        if (!isValid) {
-          throw new Error('Authentication required. Please log in again.');
+        try {
+          const isValid = await ensureAuthIsValid();
+          
+          if (!isValid) {
+            throw new Error('Authentication required. Please log in again.');
+          }
+          setIsAuthenticated(true);
+        } catch (authError) {
+          console.error('Authentication error:', authError);
+          setError('Authentication failed. Please try logging in again.');
+          setDetailedError(authError instanceof Error ? authError.message : 'Unknown authentication error');
+          
+          toast({
+            title: "Authentication error",
+            description: "Please log in again before searching for books.",
+            variant: "destructive",
+          });
+          
+          setIsSearching(false);
+          return;
         }
-        setIsAuthenticated(true);
       }
       
       const { data, error } = await supabase.functions.invoke('search-books', {
@@ -225,36 +235,70 @@ const BookUpload: React.FC<BookUploadProps> = ({ onUploadComplete }) => {
       console.log('Adding book to library:', selectedBook.volumeInfo.title);
       
       console.log('BookUpload: Forcing session refresh before adding book...');
-      const refreshSuccess = await forceSessionRefresh();
-      
-      if (!refreshSuccess) {
-        console.error('BookUpload: Failed to refresh authentication session');
-        throw new Error('Session refresh failed. Please login again.');
+      try {
+        const refreshSuccess = await forceSessionRefresh();
+        
+        if (!refreshSuccess) {
+          console.error('BookUpload: Failed to refresh authentication session');
+          throw new Error('Session refresh failed. Please login again.');
+        }
+      } catch (refreshError) {
+        console.error('Session refresh error:', refreshError);
+        setError('Authentication error. Please log in again.');
+        setDetailedError(refreshError instanceof Error ? refreshError.message : 'Unknown refresh error');
+        setIsSearching(false);
+        setExtractionStatus(null);
+        
+        toast({
+          title: "Authentication error",
+          description: "Please log in again before adding books.",
+          variant: "destructive",
+        });
+        return;
       }
       
       console.log('BookUpload: Validating auth session before adding book...');
-      const isValid = await ensureAuthIsValid();
-      if (!isValid) {
-        console.error('BookUpload: Authentication validation failed');
-        throw new Error('Authentication required. Please log in again.');
-      }
-      
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData.session) {
-        console.error('BookUpload: No active session found after refresh');
-        throw new Error('Authentication session missing. Please log in again.');
+      let sessionData;
+      try {
+        const isValid = await ensureAuthIsValid();
+        if (!isValid) {
+          throw new Error('Authentication required. Please log in again.');
+        }
+        
+        const result = await supabase.auth.getSession();
+        sessionData = result.data;
+        
+        if (!sessionData.session) {
+          throw new Error('Authentication session missing. Please log in again.');
+        }
+      } catch (authError) {
+        console.error('Authorization error:', authError);
+        setError('Authentication failed. Please log in again.');
+        setDetailedError(authError instanceof Error ? authError.message : 'Unknown auth error');
+        setIsSearching(false);
+        setExtractionStatus(null);
+        
+        toast({
+          title: "Authentication error",
+          description: "Please log in again before adding books.",
+          variant: "destructive",
+        });
+        return;
       }
       
       console.log('BookUpload: Auth validated, token present with length:', 
         sessionData.session.access_token.length);
+      
+      const bookCategory = category || 'Non-Fiction';
+      const bookAuthors = selectedBook.volumeInfo.authors || ['Unknown Author'];
       
       const { data, error } = await supabase.functions.invoke('add-book', {
         method: 'POST',
         body: { 
           bookId: selectedBook.id,
           title: selectedBook.volumeInfo.title,
-          authors: selectedBook.volumeInfo.authors || ['Unknown Author'],
-          category: category,
+          authors: bookAuthors,
+          category: bookCategory,
           previewLink: selectedBook.volumeInfo.previewLink
         },
         headers: {

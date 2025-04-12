@@ -44,13 +44,13 @@ class BookCache:
             Success flag
         """
         try:
-            # Format data for saving
+            # Format data for saving - Fix the incorrect dictionary structure by properly handling book IDs
             data = {
-                "books": {book_data.get("id", book_id): {
-                    "title": title,
-                    "author": book_data["author"],
-                    "content": book_data["content"]
-                } for book_id, (title, book_data) in enumerate(books.items())},
+                "books": {book_id: {
+                    "title": book_data.get("title", f"Book {book_id}"),
+                    "author": book_data.get("author", "Unknown"),
+                    "content": book_data.get("content", "")
+                } for book_id, book_data in books.items()},
                 "chunks": chunks
             }
             
