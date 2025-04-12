@@ -20,9 +20,11 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
   const [hasAttemptedLoad, setHasAttemptedLoad] = useState(false);
   const [bookStatus, setBookStatus] = useState<string | null>(null);
   const extractionPollingInterval = 5000; // Poll every 5 seconds for extraction status
-  const maxExtractionAttempts = 6; // Maximum polling attempts (30 seconds total)
+  const maxExtractionAttempts = 10; // Increased to 10 attempts (50 seconds total)
   const [extractionAttempts, setExtractionAttempts] = useState(0);
+  const [embedUrl, setEmbedUrl] = useState<string | null>(null);
 
+  // Effect to handle book selection and chunk loading
   useEffect(() => {
     let pollingTimer: number | null = null;
 
@@ -67,7 +69,16 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
                     pollingTimer = null;
                     
                     // Make sure we have a book title to display
-                    const bookTitle = selectedBook || (updatedChunks[0]?.title) || 'this book';
+                    const bookTitle = selectedBook || 
+                      (updatedChunks[0]?.title) || 
+                      'this book';
+                    
+                    // Check if we can find an embed URL for Google Books
+                    const bookEmbedUrl = extractGoogleBooksEmbedUrl(updatedChunks);
+                    if (bookEmbedUrl) {
+                      setEmbedUrl(bookEmbedUrl);
+                      console.log('Found Google Books embed URL:', bookEmbedUrl);
+                    }
                     
                     setMessages(prev => [
                       ...prev.filter(msg => !msg.isExtractionComplete && !msg.isExtractionStatus),
@@ -78,7 +89,8 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
                         timestamp: new Date(),
                         isSystemMessage: true,
                         isExtractionComplete: true,
-                        isBookWelcome: true
+                        isBookWelcome: true,
+                        embedUrl: bookEmbedUrl
                       }
                     ]);
                   } else if (extractionAttempts >= maxExtractionAttempts) {
@@ -132,6 +144,13 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
             // Make sure we have a book title to display
             const bookTitle = selectedBook || (chunks[0]?.title) || 'this book';
             
+            // Check if we can find an embed URL for Google Books
+            const bookEmbedUrl = extractGoogleBooksEmbedUrl(chunks);
+            if (bookEmbedUrl) {
+              setEmbedUrl(bookEmbedUrl);
+              console.log('Found Google Books embed URL:', bookEmbedUrl);
+            }
+            
             if (messages.length <= 1 || messages[messages.length - 1].type === 'user') {
               setMessages(prev => [
                 ...prev.filter(msg => !msg.isBookWelcome),
@@ -140,7 +159,8 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
                   content: `I'm ready to help you with "${bookTitle}". What would you like to know about this book?`,
                   type: 'bot',
                   timestamp: new Date(),
-                  isBookWelcome: true
+                  isBookWelcome: true,
+                  embedUrl: bookEmbedUrl
                 }
               ]);
             }
@@ -171,6 +191,7 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
         setExtractionInProgress(false);
         setHasAttemptedLoad(false);
         setExtractionAttempts(0);
+        setEmbedUrl(null);
         
         if (pollingTimer) {
           window.clearInterval(pollingTimer);
@@ -188,11 +209,48 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
     };
   }, [selectedBookId, selectedBook, messages, extractionAttempts, maxExtractionAttempts]);
 
+  // Reset hasAttemptedLoad when book changes
   useEffect(() => {
     setHasAttemptedLoad(false);
     setExtractionAttempts(0);
   }, [selectedBookId]);
 
+  // Extract Google Books embed URL from chunks
+  const extractGoogleBooksEmbedUrl = (chunks: any[]): string | null => {
+    if (!chunks || chunks.length === 0) return null;
+    
+    // First check if any chunks have a Google Books ID or external_id
+    for (const chunk of chunks) {
+      // Check for direct embed URL in the chunk
+      if (chunk.embed_url) return chunk.embed_url;
+      
+      // Check if the text contains a Google Books URL
+      const text = chunk.text || '';
+      const bookIdMatch = text.match(/books\.google\.com\/books\?id=([^&]+)/);
+      if (bookIdMatch && bookIdMatch[1]) {
+        return `https://books.google.com/books?id=${bookIdMatch[1]}&lpg=PP1&pg=PP1&output=embed`;
+      }
+      
+      // Check external_id if available
+      if (chunk.external_id && chunk.external_id.length > 5) {
+        return `https://books.google.com/books?id=${chunk.external_id}&lpg=PP1&pg=PP1&output=embed`;
+      }
+    }
+    
+    // Look for a book ID in the book_id field if it might be a Google Books ID
+    // Usually Google Books IDs are 12 characters, mixed case and may include hyphens
+    const possibleGoogleId = chunks[0].book_id;
+    if (possibleGoogleId && 
+        possibleGoogleId.length >= 10 && 
+        possibleGoogleId.length <= 15 && 
+        /^[a-zA-Z0-9_-]+$/.test(possibleGoogleId)) {
+      return `https://books.google.com/books?id=${possibleGoogleId}&lpg=PP1&pg=PP1&output=embed`;
+    }
+    
+    return null;
+  };
+
+  // Handle chat submission
   const handleSubmit = async (query: string) => {
     if (!query.trim() || isLoading) return;
     
@@ -262,7 +320,8 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
       
       const response = await sendChatRequest(requestPayload);
 
-      const embedUrl = response.embedUrl;
+      // Use existing embedUrl if available from the chunks, otherwise use the one from the response
+      const responseEmbedUrl = response.embedUrl || embedUrl;
       const responseBookTitle = response.book || bookTitle;
 
       if (extractionInProgress && selectedBookId) {
@@ -274,6 +333,13 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
             console.log(`Now loaded ${updatedChunks.length} chunks after checking`);
             setBookChunks(updatedChunks);
             setExtractionInProgress(false);
+            
+            // Check for embed URL in the new chunks
+            const newEmbedUrl = extractGoogleBooksEmbedUrl(updatedChunks);
+            if (newEmbedUrl) {
+              setEmbedUrl(newEmbedUrl);
+              console.log('Found Google Books embed URL in updated chunks:', newEmbedUrl);
+            }
             
             setMessages((prev) => [
               ...prev.filter(msg => !msg.isExtractionComplete),
@@ -309,7 +375,7 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
                       },
                     ]
                   : undefined,
-                embedUrl: embedUrl
+                embedUrl: responseEmbedUrl
               }
             : msg
         )
@@ -345,7 +411,8 @@ const useChat = (selectedBook: string | null = null, selectedBookId: string | nu
     isLoading,
     handleSubmit,
     error,
-    extractionInProgress
+    extractionInProgress,
+    embedUrl
   };
 };
 

@@ -13,34 +13,53 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
   const hasBookCitation = message.citations && message.citations.length > 0;
   const hasEmbedUrl = message.embedUrl && message.embedUrl.length > 0;
   
-  // Check for Google Books embedded viewer in the content
+  // Extract embed URL with improved detection
   const extractEmbedUrl = () => {
+    // First check if message has a direct embedUrl property
     if (hasEmbedUrl) {
       return message.embedUrl;
     }
     
     // Look for book preview URL in the content
     const content = message.content || '';
-    const previewRegex = /preview this book at: (https:\/\/[^\s]+)/i;
-    const embedRegex = /embed link: (https:\/\/[^\s]+)/i;
     
-    const previewMatch = content.match(previewRegex);
-    if (previewMatch && previewMatch[1]) {
-      const previewUrl = previewMatch[1].trim();
-      
-      // Convert preview URL to an embed URL if needed
-      if (previewUrl.includes('books.google.com') || previewUrl.includes('google.com/books')) {
-        const bookIdMatch = previewUrl.match(/\/([a-zA-Z0-9_-]+)(\?|$)/);
-        if (bookIdMatch && bookIdMatch[1]) {
-          return `https://books.google.com/books?id=${bookIdMatch[1]}&lpg=PP1&pg=PP1&output=embed`;
+    // Match various formats of Google Books links
+    const patterns = [
+      /preview this book at: (https:\/\/[^\s]+)/i,
+      /embed link: (https:\/\/[^\s]+)/i,
+      /book preview: (https:\/\/[^\s]+)/i,
+      /preview available at: (https:\/\/[^\s]+)/i,
+      /google books: (https:\/\/[^\s]+)/i,
+      /books\.google\.com\/books\?id=([a-zA-Z0-9_-]+)/i
+    ];
+    
+    for (const pattern of patterns) {
+      const match = content.match(pattern);
+      if (match) {
+        if (pattern.toString().includes('id=')) {
+          // This is the ID pattern
+          const bookId = match[1];
+          return `https://books.google.com/books?id=${bookId}&lpg=PP1&pg=PP1&output=embed`;
+        } else {
+          // This is a URL pattern
+          const url = match[1].trim();
+          
+          // Check if this is already an embed URL
+          if (url.includes('output=embed')) {
+            return url;
+          }
+          
+          // Convert standard Google Books URL to embed URL
+          if (url.includes('books.google.com') || url.includes('google.com/books')) {
+            const bookIdMatch = url.match(/id=([a-zA-Z0-9_-]+)/);
+            if (bookIdMatch && bookIdMatch[1]) {
+              return `https://books.google.com/books?id=${bookIdMatch[1]}&lpg=PP1&pg=PP1&output=embed`;
+            }
+          }
+          
+          return url;
         }
-        return previewUrl;
       }
-    }
-    
-    const embedMatch = content.match(embedRegex);
-    if (embedMatch && embedMatch[1]) {
-      return embedMatch[1].trim();
     }
     
     return null;
@@ -52,12 +71,14 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
     
     let content = message.content;
     
-    // Remove the preview URL line if we're displaying it as an iframe
+    // Only remove URL references if we're displaying the embed
     if (extractEmbedUrl()) {
       content = content
         .replace(/\n*You can preview this book at: https:\/\/[^\n]+\n*/g, '')
         .replace(/\n*Embed link: https:\/\/[^\n]+\n*/g, '')
-        .replace(/\n*A preview of this book is available at: https:\/\/[^\n]+\n*/g, '');
+        .replace(/\n*A preview of this book is available at: https:\/\/[^\n]+\n*/g, '')
+        .replace(/\n*Google Books: https:\/\/[^\n]+\n*/g, '')
+        .replace(/\n*Book preview: https:\/\/[^\n]+\n*/g, '');
     }
     
     return content;

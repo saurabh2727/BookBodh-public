@@ -96,14 +96,15 @@ def extract_book_content_handler(book_id: str, data: Dict[str, Any], db):
             }
         )
         
-        # Extract content from Google Books
-        logger.info(f"Starting extraction for book {book_id} (Google Books ID: {external_id})")
-        extracted_text, screenshot_paths = extractor.extract_from_google_books(external_id, book.title)
+        # Extract content from Google Books - use a higher max_pages value to get more content
+        logger.info(f"Starting enhanced extraction for book {book_id} (Google Books ID: {external_id})")
+        extracted_text, screenshot_paths = extractor.extract_from_google_books(external_id, book.title, max_pages=30)
         
         logger.info(f"Extraction completed. Got {len(extracted_text)} chars of text and {len(screenshot_paths)} screenshots")
         
-        # Process the extracted text into chunks
-        chunks = extractor.process_book_to_chunks(book_id, extracted_text, book.title, book.author)
+        # Process the extracted text into chunks with a smaller chunk size for better context
+        # Using 800 characters instead of 1000 to get more focused chunks
+        chunks = extractor.process_book_to_chunks(book_id, extracted_text, book.title, book.author, chunk_size=800)
         
         # Update the book record with the chunk count and status
         update_book(
@@ -112,7 +113,8 @@ def extract_book_content_handler(book_id: str, data: Dict[str, Any], db):
             {
                 "status": "processed", 
                 "chunks_count": len(chunks),
-                "summary": extracted_text[:500] + ("..." if len(extracted_text) > 500 else "")
+                "summary": extracted_text[:500] + ("..." if len(extracted_text) > 500 else ""),
+                "external_id": external_id  # Make sure external_id is saved for future reference
             }
         )
         
@@ -126,7 +128,8 @@ def extract_book_content_handler(book_id: str, data: Dict[str, Any], db):
                 chunk["chunk_index"], 
                 chunk["text"], 
                 book.title, 
-                book.author
+                book.author,
+                external_id=external_id  # Pass external_id to the chunk for embed URL generation
             )
             if chunk_record:
                 chunk_records.append(chunk_record)
@@ -141,7 +144,8 @@ def extract_book_content_handler(book_id: str, data: Dict[str, Any], db):
             "text_length": len(extracted_text),
             "timestamp": extractor.get_current_time(),
             "chunks_created": len(chunk_records),
-            "status": "processed"
+            "status": "processed",
+            "embed_url": f"https://books.google.com/books?id={external_id}&lpg=PP1&pg=PP1&output=embed"
         }
     except Exception as e:
         return handle_extraction_error(book_id, e, db)
